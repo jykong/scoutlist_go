@@ -30,15 +30,20 @@ func (cu *clientUser) getCurrentUserID() {
 }
 
 func (cu *clientUser) getPlaylists(file string) {
-	playlistsPage, err := cu.client.GetPlaylistsForUser(cu.userID)
-	if err != nil {
-		log.Fatal(err)
-	}
-	//total := playlistsPage.Total
-	//offset := playlistsPage.Offset
-	limit := playlistsPage.Limit
-	fmt.Println(playlistsPage.Total)
-	for i := 0; i < limit; i++ {
-		fmt.Println(playlistsPage.Playlists[i].ID, playlistsPage.Playlists[i].Name)
+	var opt spotify.Options
+	offset, limit := 0, 50
+	opt.Offset = &offset
+	opt.Limit = &limit
+
+	for total := limit; offset < total; offset += limit {
+		playlistsPage, err := cu.client.GetPlaylistsForUserOpt(cu.userID, &opt)
+		if err != nil {
+			log.Println(err)
+		}
+
+		for i, pl := range playlistsPage.Playlists {
+			fmt.Printf("%03d) %s %s\n", offset+i, pl.ID, pl.Name)
+		}
+		total = playlistsPage.Total
 	}
 }
