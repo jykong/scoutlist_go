@@ -22,6 +22,9 @@ func main() {
 	cu.getCurrentUserID()
 
 	cu.getPlaylists(playlistsPath)
+	var excPlaylists playlistsContainer
+	cu.loadPlaylists(playlistsPath, &excPlaylists)
+	fmt.Println(excPlaylists)
 }
 
 func (cu *clientUser) getCurrentUserID() {
@@ -33,9 +36,13 @@ func (cu *clientUser) getCurrentUserID() {
 	cu.userID = user.ID
 }
 
-type playlistIDName struct {
-	ID   spotify.ID `json:"ID"`
-	Name string     `json:"Name"`
+type playlistEntry struct {
+	ID   spotify.ID `json:"id"`
+	Name string     `json:"name"`
+}
+
+type playlistsContainer struct {
+	Playlists []playlistEntry `json:"items"`
 }
 
 func (cu *clientUser) getPlaylists(filePath string) {
@@ -47,7 +54,8 @@ func (cu *clientUser) getPlaylists(filePath string) {
 	opt.Limit = &limit
 
 	var encoder *json.Encoder
-	var playlists []playlistIDName
+	var total int
+	var playlists []playlistEntry
 
 	if filePath != "" {
 		os.Remove(filePath)
@@ -60,7 +68,7 @@ func (cu *clientUser) getPlaylists(filePath string) {
 		encoder = json.NewEncoder(file)
 	}
 
-	for total := limit; offset < total; offset += limit {
+	for total = limit; offset < total; offset += limit {
 		playlistsPage, err := cu.client.GetPlaylistsForUserOpt(cu.userID, &opt)
 		if err != nil {
 			log.Fatal(err)
@@ -69,13 +77,13 @@ func (cu *clientUser) getPlaylists(filePath string) {
 
 		if encoder != nil {
 			if playlists == nil {
-				playlists = make([]playlistIDName, 0, total)
+				playlists = make([]playlistEntry, 0, total)
 			}
-			var plIDName playlistIDName
+			var plEntry playlistEntry
 			for _, pl := range playlistsPage.Playlists {
-				plIDName.ID = pl.ID
-				plIDName.Name = pl.Name
-				playlists = append(playlists, plIDName)
+				plEntry.ID = pl.ID
+				plEntry.Name = pl.Name
+				playlists = append(playlists, plEntry)
 			}
 		} else {
 			for i, pl := range playlistsPage.Playlists {
@@ -85,11 +93,26 @@ func (cu *clientUser) getPlaylists(filePath string) {
 	}
 
 	if encoder != nil {
+		var plCon playlistsContainer
+		plCon.Playlists = playlists
 		encoder.SetIndent("", "\t")
-		err := encoder.Encode(playlists)
+		err := encoder.Encode(plCon)
 		if err != nil {
 			log.Fatal(err)
 		}
 		log.Println("User playlists saved to", playlistsPath)
+	}
+}
+
+func (cu *clientUser) loadPlaylists(filePath string, plCon *playlistsContainer) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	decoder := json.NewDecoder(file)
+	err = decoder.Decode(&plCon)
+	if err != nil {
+		log.Fatal(err)
 	}
 }
