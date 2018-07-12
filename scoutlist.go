@@ -7,24 +7,26 @@ import (
 	"github.com/zmb3/spotify"
 )
 
-// clientUser contains a client and userID
 type clientUser struct {
 	client *spotify.Client
 	userID string
 }
 
 func main() {
-	var client *spotify.Client
-	client = scoutlistAuth()
-	// use the client to make calls that require authorization
-	user, err := client.CurrentUser()
+	var cu clientUser
+	cu.client = scoutlistAuth()
+	cu.getCurrentUserID()
+
+	cu.getPlaylists("")
+}
+
+func (cu *clientUser) getCurrentUserID() {
+	user, err := cu.client.CurrentUser()
 	if err != nil {
 		log.Fatal(err)
 	}
 	fmt.Println("You are logged in as:", user.ID)
-
-	cu := clientUser{client, user.ID}
-	cu.getPlaylists("")
+	cu.userID = user.ID
 }
 
 func (cu *clientUser) getPlaylists(file string) {
