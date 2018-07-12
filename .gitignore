@@ -16,3 +16,4 @@
 debug
 *.gob
 *.code-workspace
+*.json
