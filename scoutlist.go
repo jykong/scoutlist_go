@@ -181,27 +181,24 @@ func (uniqueTracks *tracksContainer) contains(tid spotify.ID, ta *titleArtists) 
 			if nArtists != len(uta.Artists) {
 				continue
 			}
+
 			uartists := make([]string, nArtists)
 			artists := make([]string, nArtists)
 			copy(uartists, uta.Artists)
 			copy(artists, ta.Artists)
+
 			for match := true; match == true; {
 				match = false
 				for i, uartist := range uartists {
-					for j, artist := range artists {
-						if artist == uartist {
-							uartists = append(uartists[:i], uartists[i+1:]...)
-							artists = append(artists[:j], artists[j+1:]...)
-							match = true
-							break
-						}
-					}
-					if match {
+					if artists[0] == uartist {
+						uartists = append(uartists[:i], uartists[i+1:]...)
+						artists = artists[1:]
+						match = true
 						break
 					}
 				}
 			}
-			if len(uartists) == 0 && len(artists) == 0 {
+			if len(artists) == 0 {
 				return true
 			}
 		}
