@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/gob"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -29,11 +30,12 @@ type titleArtists struct {
 }
 
 type tracksContainer struct {
-	tracksMap map[spotify.ID]titleArtists
+	TracksMap map[spotify.ID]titleArtists
 }
 
 const playlistsPath = "./playlists.json"
-const excPlaylistsPath = "./exc_playlists.json"
+const excPlaylistsPath = "./exc_playlists.1.json"
+const excTracksPath = "./exc_tracks.gob"
 
 func main() {
 	var cu clientUser
@@ -42,15 +44,17 @@ func main() {
 
 	//var playlists playlistsContainer
 	//cu.getPlaylists(&playlists)
-	//savePlaylists(playlistsPath, &playlists)
+	//savePlaylistsToJSON(playlistsPath, &playlists)
 
 	var excPlaylists playlistsContainer
-	loadPlaylists(excPlaylistsPath, &excPlaylists)
+	loadPlaylistsFromJSON(excPlaylistsPath, &excPlaylists)
 	//fmt.Println(excPlaylists)
 
 	var excTracks tracksContainer
-	cu.getUniqueTracksFromPlaylists(&excPlaylists, &excTracks)
-	fmt.Println(len(excTracks.tracksMap))
+	//cu.getUniqueTracksFromPlaylists(&excPlaylists, &excTracks)
+	//saveTracksToGob(excTracksPath, &excTracks)
+	loadTracksFromGob(excTracksPath, &excTracks)
+	fmt.Println(len(excTracks.TracksMap))
 	//fmt.Println(excTracks)
 }
 
@@ -97,7 +101,7 @@ func (cu *clientUser) getPlaylists(plCon *playlistsContainer) {
 	plCon.Playlists = playlists
 }
 
-func savePlaylists(filePath string, plCon *playlistsContainer) {
+func savePlaylistsToJSON(filePath string, plCon *playlistsContainer) {
 	var encoder *json.Encoder
 
 	os.Remove(filePath)
@@ -116,7 +120,7 @@ func savePlaylists(filePath string, plCon *playlistsContainer) {
 	log.Println("User playlists saved to", playlistsPath)
 }
 
-func loadPlaylists(filePath string, plCon *playlistsContainer) {
+func loadPlaylistsFromJSON(filePath string, plCon *playlistsContainer) {
 	log.Println("Loading playlists from", filePath)
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -145,7 +149,7 @@ func (cu *clientUser) getUniqueTracksFromPlaylists(
 	var total int
 	var ta titleArtists
 
-	uniqueTracks.tracksMap = make(map[spotify.ID]titleArtists)
+	uniqueTracks.TracksMap = make(map[spotify.ID]titleArtists)
 
 	acc := 0
 	for _, pl := range srcPlaylists.Playlists {
@@ -171,11 +175,11 @@ func (cu *clientUser) getUniqueTracksFromPlaylists(
 }
 
 func (uniqueTracks *tracksContainer) contains(tid spotify.ID, ta *titleArtists) bool {
-	_, present := uniqueTracks.tracksMap[tid]
+	_, present := uniqueTracks.TracksMap[tid]
 	if present == true {
 		return true
 	}
-	for _, uta := range uniqueTracks.tracksMap {
+	for _, uta := range uniqueTracks.TracksMap {
 		if ta.Title == uta.Title {
 			nArtists := len(ta.Artists)
 			if nArtists != len(uta.Artists) {
@@ -208,6 +212,37 @@ func (uniqueTracks *tracksContainer) contains(tid spotify.ID, ta *titleArtists) 
 
 func (uniqueTracks *tracksContainer) add(tid spotify.ID, ta *titleArtists) {
 	if uniqueTracks.contains(tid, ta) == false {
-		uniqueTracks.tracksMap[tid] = *ta
+		uniqueTracks.TracksMap[tid] = *ta
+	}
+}
+
+func saveTracksToGob(filePath string, tracks *tracksContainer) {
+	os.Remove(filePath)
+
+	file, err := os.Create(filePath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer file.Close()
+
+	encoder := gob.NewEncoder(file)
+	err = encoder.Encode(*tracks)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Println("Saved tracks to", filePath)
+}
+
+func loadTracksFromGob(filePath string, tracks *tracksContainer) {
+	log.Println("Loading tracks from:", filePath)
+	file, err := os.Open(filePath)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	decoder := gob.NewDecoder(file)
+	err = decoder.Decode(tracks)
+	if err != nil {
+		log.Fatal(err)
 	}
 }
