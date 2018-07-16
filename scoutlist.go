@@ -34,8 +34,9 @@ type tracksContainer struct {
 }
 
 const playlistsPath = "./playlists.json"
-const excPlaylistsPath = "./exc_playlists.1.json"
+const excPlaylistsPath = "./exc_playlists.json"
 const excTracksPath = "./exc_tracks.gob"
+const incPlaylistPath = "./inc_playlists.json"
 
 func main() {
 	var cu clientUser
@@ -51,11 +52,19 @@ func main() {
 	//fmt.Println(excPlaylists)
 
 	var excTracks tracksContainer
-	//cu.getUniqueTracksFromPlaylists(&excPlaylists, &excTracks)
+	//cu.getUniqueTracksFromPlaylists(&excTracks, &excPlaylists, nil)
 	//saveTracksToGob(excTracksPath, &excTracks)
 	loadTracksFromGob(excTracksPath, &excTracks)
 	fmt.Println(len(excTracks.TracksMap))
 	//fmt.Println(excTracks)
+
+	var incPlaylists playlistsContainer
+	loadPlaylistsFromJSON(incPlaylistPath, &incPlaylists)
+
+	var filteredTracks tracksContainer
+	cu.getUniqueTracksFromPlaylists(&filteredTracks, &incPlaylists, &excTracks)
+	fmt.Println(len(filteredTracks.TracksMap))
+	fmt.Println(filteredTracks)
 }
 
 func (cu *clientUser) getCurrentUserID() {
@@ -135,7 +144,8 @@ func loadPlaylistsFromJSON(filePath string, plCon *playlistsContainer) {
 }
 
 func (cu *clientUser) getUniqueTracksFromPlaylists(
-	srcPlaylists *playlistsContainer, uniqueTracks *tracksContainer) {
+	uniqueTracks *tracksContainer, srcPlaylists *playlistsContainer,
+	excTracks *tracksContainer) {
 
 	log.Println("Getting unique tracks from playlists...")
 	var offset, limit int
@@ -165,7 +175,11 @@ func (cu *clientUser) getUniqueTracksFromPlaylists(
 				for _, ar := range tr.Track.Artists {
 					ta.Artists = append(ta.Artists, ar.Name)
 				}
-				uniqueTracks.add(tr.Track.ID, &ta)
+				if excTracks != nil {
+					if !excTracks.contains(tr.Track.ID, &ta) {
+						uniqueTracks.add(tr.Track.ID, &ta)
+					}
+				}
 			}
 		}
 		acc += total
