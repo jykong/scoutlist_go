@@ -37,6 +37,7 @@ const playlistsPath = "./playlists.json"
 const excPlaylistsPath = "./exc_playlists.json"
 const excTracksPath = "./exc_tracks.gob"
 const incPlaylistPath = "./inc_playlists.json"
+const scoutlistIDPath = "./scoutlist_id.gob"
 
 func main() {
 	var cu clientUser
@@ -64,7 +65,13 @@ func main() {
 	var filteredTracks tracksContainer
 	cu.getUniqueTracksFromPlaylists(&filteredTracks, &incPlaylists, &excTracks)
 	fmt.Println(len(filteredTracks.TracksMap))
-	fmt.Println(filteredTracks)
+	//fmt.Println(filteredTracks)
+
+	var scoutlistID spotify.ID
+	loadIDFromGob(scoutlistIDPath, &scoutlistID)
+	scoutlistID = cu.recycleScoutlist(scoutlistID)
+	saveIDToGob(scoutlistIDPath, &scoutlistID)
+	//cu.addTracksToScoutlist(scoutlistIDPath)
 }
 
 func (cu *clientUser) getCurrentUserID() {
@@ -179,6 +186,8 @@ func (cu *clientUser) getUniqueTracksFromPlaylists(
 					if !excTracks.contains(tr.Track.ID, &ta) {
 						uniqueTracks.add(tr.Track.ID, &ta)
 					}
+				} else {
+					uniqueTracks.add(tr.Track.ID, &ta)
 				}
 			}
 		}
@@ -259,4 +268,58 @@ func loadTracksFromGob(filePath string, tracks *tracksContainer) {
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+func loadIDFromGob(filePath string, spid *spotify.ID) {
+	log.Println("Loading ID from:", filePath)
+	file, err := os.Open(filePath)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	decoder := gob.NewDecoder(file)
+	err = decoder.Decode(spid)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func saveIDToGob(filePath string, spid *spotify.ID) {
+	os.Remove(filePath)
+
+	file, err := os.Create(filePath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer file.Close()
+
+	encoder := gob.NewEncoder(file)
+	err = encoder.Encode(*spid)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Println("Saved ID to", filePath)
+}
+
+func (cu *clientUser) recycleScoutlist(scoutlistID spotify.ID) spotify.ID {
+	if scoutlistID == "" {
+		return cu.createScoutlist(scoutlistID)
+	}
+	_, err := cu.client.GetPlaylist(cu.userID, scoutlistID)
+	if err != nil {
+		log.Println("scoutlist not found on Spotify")
+		return cu.createScoutlist(scoutlistID)
+	}
+	// TODO: move current tracks to trash, delete current tracks
+	return scoutlistID
+}
+
+func (cu *clientUser) createScoutlist(scoutlistID spotify.ID) spotify.ID {
+	log.Println("Creating new scoutlist...")
+	pl, err := cu.client.CreatePlaylistForUser(cu.userID, "Scoutlist", false)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return pl.ID
 }
