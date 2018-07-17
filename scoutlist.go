@@ -1,11 +1,8 @@
 package main
 
 import (
-	"encoding/gob"
-	"encoding/json"
 	"fmt"
 	"log"
-	"os"
 
 	"github.com/zmb3/spotify"
 )
@@ -14,64 +11,46 @@ type clientUser struct {
 	client *spotify.Client
 	userID string
 }
-
 type playlistEntry struct {
 	ID   spotify.ID `json:"id"`
 	Name string     `json:"name"`
 }
-
 type playlistsContainer struct {
 	Playlists []playlistEntry `json:"items"`
 }
-
 type titleArtists struct {
 	Title   string
 	Artists []string
 }
-
 type tracksContainer struct {
 	TracksMap map[spotify.ID]titleArtists
 }
-
-const playlistsPath = "./playlists.json"
-const excPlaylistsPath = "./exc_playlists.json"
-const excTracksPath = "./exc_tracks.gob"
-const incPlaylistPath = "./inc_playlists.json"
-const scoutlistIDPath = "./scoutlist_id.gob"
-const scoutedlistIDPath = "./scoutedlist_id.gob"
 
 func main() {
 	var cu clientUser
 	cu.client = scoutlistAuth()
 	cu.getCurrentUserID()
 
-	//var playlists playlistsContainer
-	//cu.getPlaylists(&playlists)
+	//playlists := cu.getPlaylists()
 	//savePlaylistsToJSON(playlistsPath, &playlists)
 
-	var excPlaylists playlistsContainer
-	loadPlaylistsFromJSON(excPlaylistsPath, &excPlaylists)
+	//excPlaylists := loadPlaylistsFromJSON(excPlaylistsPath)
 	//fmt.Println(excPlaylists)
 
-	var excTracks tracksContainer
-	//cu.getUniqueTracksFromPlaylists(&excTracks, &excPlaylists, nil)
+	//excTracks := cu.getUniqueTracksFromPlaylists(&excPlaylists, nil)
 	//saveTracksToGob(excTracksPath, &excTracks)
-	loadTracksFromGob(excTracksPath, &excTracks)
+	excTracks := loadTracksFromGob(excTracksPath)
 	fmt.Println(len(excTracks.TracksMap))
 	//fmt.Println(excTracks)
 
-	var incPlaylists playlistsContainer
-	loadPlaylistsFromJSON(incPlaylistPath, &incPlaylists)
+	incPlaylists := loadPlaylistsFromJSON(incPlaylistPath)
 
-	var filteredTracks tracksContainer
-	cu.getUniqueTracksFromPlaylists(&filteredTracks, &incPlaylists, &excTracks)
+	filteredTracks := cu.getUniqueTracksFromPlaylists(&incPlaylists, &excTracks)
 	fmt.Println(len(filteredTracks.TracksMap))
 	//fmt.Println(filteredTracks)
 
-	var scoutlistID spotify.ID
-	var scoutedlistID spotify.ID
-	loadIDFromGob(scoutlistIDPath, &scoutlistID)
-	loadIDFromGob(scoutedlistIDPath, &scoutedlistID)
+	scoutlistID := loadIDFromGob(scoutlistIDPath)
+	scoutedlistID := loadIDFromGob(scoutedlistIDPath)
 	scoutlistID, scoutedlistID = cu.recycleScoutlist(scoutlistID, scoutedlistID)
 	saveIDToGob(scoutlistIDPath, &scoutlistID)
 	saveIDToGob(scoutedlistIDPath, &scoutedlistID)
@@ -87,18 +66,14 @@ func (cu *clientUser) getCurrentUserID() {
 	cu.userID = user.ID
 }
 
-func (cu *clientUser) getPlaylists(plCon *playlistsContainer) {
+func (cu *clientUser) getPlaylists() playlistsContainer {
 	log.Println("Getting user playlists")
 	offset, limit := 0, 50
-
 	var opt spotify.Options
 	opt.Offset = &offset
 	opt.Limit = &limit
-
-	var total int
 	var playlists []playlistEntry
-
-	for total = limit; offset < total; offset += limit {
+	for total := limit; offset < total; offset += limit {
 		playlistsPage, err := cu.client.GetPlaylistsForUserOpt(cu.userID, &opt)
 		if err != nil {
 			log.Fatal(err)
@@ -117,61 +92,22 @@ func (cu *clientUser) getPlaylists(plCon *playlistsContainer) {
 		//	fmt.Printf("%03d) %s %s\n", offset+i, pl.ID, pl.Name)
 		//}
 	}
-
+	var plCon playlistsContainer
 	plCon.Playlists = playlists
-}
-
-func savePlaylistsToJSON(filePath string, plCon *playlistsContainer) {
-	var encoder *json.Encoder
-
-	os.Remove(filePath)
-
-	file, err := os.Create(filePath)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer file.Close()
-	encoder = json.NewEncoder(file)
-	encoder.SetIndent("", "\t")
-	err = encoder.Encode(plCon)
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Println("User playlists saved to", playlistsPath)
-}
-
-func loadPlaylistsFromJSON(filePath string, plCon *playlistsContainer) {
-	log.Println("Loading playlists from", filePath)
-	file, err := os.Open(filePath)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	decoder := json.NewDecoder(file)
-	err = decoder.Decode(&plCon)
-	if err != nil {
-		log.Fatal(err)
-	}
+	return plCon
 }
 
 func (cu *clientUser) getUniqueTracksFromPlaylists(
-	uniqueTracks *tracksContainer, srcPlaylists *playlistsContainer,
-	excTracks *tracksContainer) {
-
+	srcPlaylists *playlistsContainer, excTracks *tracksContainer) tracksContainer {
 	log.Println("Getting unique tracks from playlists...")
-	var offset, limit int
-
+	var offset, limit, total int
 	var opt spotify.Options
 	opt.Offset = &offset
 	opt.Limit = &limit
-
 	fields := "items.track(id, name, artists.id), total"
-
-	var total int
 	var ta titleArtists
-
+	var uniqueTracks tracksContainer
 	uniqueTracks.TracksMap = make(map[spotify.ID]titleArtists)
-
 	acc := 0
 	for _, pl := range srcPlaylists.Playlists {
 		for offset, limit, total = 0, 100, 100; offset < total; offset += limit {
@@ -199,6 +135,7 @@ func (cu *clientUser) getUniqueTracksFromPlaylists(
 	}
 	log.Println("Done getting unique tracks.")
 	fmt.Println(acc)
+	return uniqueTracks
 }
 
 func (uniqueTracks *tracksContainer) contains(tid spotify.ID, ta *titleArtists) bool {
@@ -212,12 +149,10 @@ func (uniqueTracks *tracksContainer) contains(tid spotify.ID, ta *titleArtists) 
 			if nArtists != len(uta.Artists) {
 				continue
 			}
-
 			uartists := make([]string, nArtists)
 			artists := make([]string, nArtists)
 			copy(uartists, uta.Artists)
 			copy(artists, ta.Artists)
-
 			for match := true; match == true; {
 				match = false
 				for i, uartist := range uartists {
@@ -241,69 +176,6 @@ func (uniqueTracks *tracksContainer) add(tid spotify.ID, ta *titleArtists) {
 	if uniqueTracks.contains(tid, ta) == false {
 		uniqueTracks.TracksMap[tid] = *ta
 	}
-}
-
-func saveTracksToGob(filePath string, tracks *tracksContainer) {
-	os.Remove(filePath)
-
-	file, err := os.Create(filePath)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer file.Close()
-
-	encoder := gob.NewEncoder(file)
-	err = encoder.Encode(*tracks)
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Println("Saved tracks to", filePath)
-}
-
-func loadTracksFromGob(filePath string, tracks *tracksContainer) {
-	log.Println("Loading tracks from:", filePath)
-	file, err := os.Open(filePath)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	decoder := gob.NewDecoder(file)
-	err = decoder.Decode(tracks)
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
-func loadIDFromGob(filePath string, spid *spotify.ID) {
-	log.Println("Loading ID from:", filePath)
-	file, err := os.Open(filePath)
-	if err != nil {
-		log.Println(err)
-		return
-	}
-
-	decoder := gob.NewDecoder(file)
-	err = decoder.Decode(spid)
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
-func saveIDToGob(filePath string, spid *spotify.ID) {
-	os.Remove(filePath)
-
-	file, err := os.Create(filePath)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer file.Close()
-
-	encoder := gob.NewEncoder(file)
-	err = encoder.Encode(*spid)
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Println("Saved ID to", filePath)
 }
 
 func (cu *clientUser) recycleScoutlist(
