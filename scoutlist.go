@@ -38,6 +38,7 @@ const excPlaylistsPath = "./exc_playlists.json"
 const excTracksPath = "./exc_tracks.gob"
 const incPlaylistPath = "./inc_playlists.json"
 const scoutlistIDPath = "./scoutlist_id.gob"
+const scoutedlistIDPath = "./scoutedlist_id.gob"
 
 func main() {
 	var cu clientUser
@@ -68,10 +69,13 @@ func main() {
 	//fmt.Println(filteredTracks)
 
 	var scoutlistID spotify.ID
+	var scoutedlistID spotify.ID
 	loadIDFromGob(scoutlistIDPath, &scoutlistID)
-	scoutlistID = cu.recycleScoutlist(scoutlistID)
+	loadIDFromGob(scoutedlistIDPath, &scoutedlistID)
+	scoutlistID, scoutedlistID = cu.recycleScoutlist(scoutlistID, scoutedlistID)
 	saveIDToGob(scoutlistIDPath, &scoutlistID)
-	//cu.addTracksToScoutlist(scoutlistIDPath)
+	saveIDToGob(scoutedlistIDPath, &scoutedlistID)
+	cu.replacePlaylistWithNTracks(scoutlistID, &filteredTracks, 30)
 }
 
 func (cu *clientUser) getCurrentUserID() {
@@ -302,24 +306,90 @@ func saveIDToGob(filePath string, spid *spotify.ID) {
 	log.Println("Saved ID to", filePath)
 }
 
-func (cu *clientUser) recycleScoutlist(scoutlistID spotify.ID) spotify.ID {
+func (cu *clientUser) recycleScoutlist(
+	scoutlistID spotify.ID, scoutedlistID spotify.ID) (spotify.ID, spotify.ID) {
 	if scoutlistID == "" {
-		return cu.createScoutlist(scoutlistID)
+		return cu.createPlaylist(scoutlistID, "Scoutlist"), ""
 	}
 	_, err := cu.client.GetPlaylist(cu.userID, scoutlistID)
 	if err != nil {
-		log.Println("scoutlist not found on Spotify")
-		return cu.createScoutlist(scoutlistID)
+		// TODO: modify to examine # of followers & followers object
+		log.Println("Scoutlist not found on Spotify")
+		return cu.createPlaylist(scoutlistID, "Scoutlist"), ""
 	}
-	// TODO: move current tracks to trash, delete current tracks
-	return scoutlistID
+	if scoutedlistID == "" {
+		scoutedlistID = cu.createPlaylist(scoutedlistID, "Scoutedlist")
+	} else {
+		_, err := cu.client.GetPlaylist(cu.userID, scoutedlistID)
+		if err != nil {
+			// TODO: modify to examine # of followers & followers object
+			log.Println("Scoutedlist not found on Spotify")
+			scoutedlistID = cu.createPlaylist(scoutedlistID, "Scoutedlist")
+		}
+	}
+	scoutlistTrackIDs, err := cu.getPlaylistTrackIDs(scoutlistID)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if len(scoutlistTrackIDs) > 0 {
+		// Maybe TODO: modify this to add only unique tracks
+		_, err = cu.client.AddTracksToPlaylist(cu.userID, scoutedlistID, scoutlistTrackIDs...)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+	return scoutlistID, scoutedlistID
 }
 
-func (cu *clientUser) createScoutlist(scoutlistID spotify.ID) spotify.ID {
-	log.Println("Creating new scoutlist...")
-	pl, err := cu.client.CreatePlaylistForUser(cu.userID, "Scoutlist", false)
+func (cu *clientUser) createPlaylist(scoutlistID spotify.ID, s string) spotify.ID {
+	log.Println("Creating new", s)
+	pl, err := cu.client.CreatePlaylistForUser(cu.userID, s, false)
 	if err != nil {
 		log.Fatal(err)
 	}
 	return pl.ID
+}
+
+func (cu *clientUser) getPlaylistTrackIDs(plid spotify.ID) ([]spotify.ID, error) {
+	log.Println("Getting playlist track ids...")
+	var trackIDs []spotify.ID
+	var offset, limit, total int
+	var opt spotify.Options
+	opt.Offset = &offset
+	opt.Limit = &limit
+	fields := "items.track.id, total"
+	for offset, limit, total = 0, 100, 100; offset < total; offset += limit {
+		plTrackPage, err := cu.client.GetPlaylistTracksOpt(cu.userID, plid, &opt, fields)
+		if err != nil {
+			return trackIDs, err
+		}
+		total = plTrackPage.Total
+		if trackIDs == nil {
+			trackIDs = make([]spotify.ID, total)
+		}
+		for i, tr := range plTrackPage.Tracks {
+			trackIDs[offset+i] = tr.Track.ID
+		}
+	}
+	return trackIDs, nil
+}
+
+func (cu *clientUser) replacePlaylistWithNTracks(plid spotify.ID, trCon *tracksContainer, n int) {
+	log.Println("Replacing playlist tracks...")
+	size := len(trCon.TracksMap)
+	if size < n {
+		n = size
+	}
+	trackIDs := make([]spotify.ID, n)
+	i := 0
+	for k := range trCon.TracksMap {
+		trackIDs[i] = k
+		if i++; i >= n {
+			break
+		}
+	}
+	err := cu.client.ReplacePlaylistTracks(cu.userID, plid, trackIDs...)
+	if err != nil {
+		log.Fatal(err)
+	}
 }
