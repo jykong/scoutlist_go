@@ -17,3 +17,6 @@ debug
 *.gob
 *.code-workspace
 *.json
+*.png
+*.prof
+scoutlist
