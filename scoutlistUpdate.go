@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"runtime"
-	"sync"
 	"time"
 
 	"github.com/zmb3/spotify"
@@ -24,6 +23,10 @@ type titleArtists struct {
 type tracksContainer struct {
 	TracksMap map[spotify.ID]titleArtists
 }
+type trackIDta struct {
+	ID spotify.ID
+	ta titleArtists
+}
 
 func scoutlistUpdate(cu *clientUser) {
 	cu.client.AutoRetry = true
@@ -34,18 +37,20 @@ func scoutlistUpdate(cu *clientUser) {
 	excPlaylists := loadPlaylistsFromJSON(excPlaylistsPath)
 	//fmt.Println(excPlaylists)
 
-	//excTracks := cu.getUniqueTracksFromPlaylists(&excPlaylists, nil)
 	excTracks := cu.getUniqueTracksFromPlaylistsAsync(&excPlaylists, nil)
+	fmt.Println(len(excTracks))
+	//excTracks := cu.getUniqueTracksFromPlaylists(&excPlaylists, nil)
 	//saveTracksToGob(excTracksPath, &excTracks)
 	//excTracks := loadTracksFromGob(excTracksPath)
-	fmt.Println(len(excTracks.TracksMap))
+	//fmt.Println(len(excTracks.TracksMap))
 	//fmt.Println(excTracks)
 
 	incPlaylists := loadPlaylistsFromJSON(incPlaylistPath)
 
+	filteredTracks := cu.getUniqueTracksFromPlaylistsAsync(&incPlaylists, excTracks)
+	fmt.Println(len(filteredTracks))
 	//filteredTracks := cu.getUniqueTracksFromPlaylists(&incPlaylists, &excTracks)
-	filteredTracks := cu.getUniqueTracksFromPlaylistsAsync(&incPlaylists, &excTracks)
-	fmt.Println(len(filteredTracks.TracksMap))
+	//fmt.Println(len(filteredTracks.TracksMap))
 	//fmt.Println(filteredTracks)
 
 	scoutlistID := loadIDFromGob(scoutlistIDPath)
@@ -53,7 +58,9 @@ func scoutlistUpdate(cu *clientUser) {
 	scoutlistID, scoutedlistID = cu.recycleScoutlist(scoutlistID, scoutedlistID)
 	saveIDToGob(scoutlistIDPath, &scoutlistID)
 	saveIDToGob(scoutedlistIDPath, &scoutedlistID)
-	cu.replacePlaylistWithNTracks(scoutlistID, &filteredTracks, 30)
+	//trackIDs := getNTrackIDsFromTracksContainer(&filteredTracks, 30)
+	trackIDs := getNTrackIDsFromTrackIDtaSlice(filteredTracks, 30)
+	cu.replacePlaylistTracks(scoutlistID, trackIDs)
 }
 
 func (cu *clientUser) getPlaylists() playlistsContainer {
@@ -129,47 +136,39 @@ func (cu *clientUser) getUniqueTracksFromPlaylists(
 }
 
 func (cu *clientUser) getUniqueTracksFromPlaylistsAsync(
-	srcPlaylists *playlistsContainer, excTracks *tracksContainer) tracksContainer {
+	srcPlaylists *playlistsContainer, excTracks []trackIDta) []trackIDta {
 	log.Println("Getting unique tracks from playlists...")
-	var uniqueTracks tracksContainer
-	uniqueTracks.TracksMap = make(map[spotify.ID]titleArtists)
-	tracksMaps := make(chan (map[spotify.ID]titleArtists), len(srcPlaylists.Playlists))
 	ratelimiter := make(chan int, 5)
-	done := make(chan int, 1)
-	var wg sync.WaitGroup
-	acc := 0
-	go rateLimiter(ratelimiter, done)
+	stopRateLimiter := make(chan int, 1)
+	go rateLimiter(ratelimiter, stopRateLimiter)
+	runtime.Gosched()
+
+	plTracks := make(chan []trackIDta, len(srcPlaylists.Playlists))
 	for _, pl := range srcPlaylists.Playlists {
-		wg.Add(1)
-		go cu.playlistTracksFetcher(&wg, ratelimiter, pl.ID, tracksMaps, excTracks)
+		go cu.fetchPlaylistTracks(ratelimiter, pl.ID, plTracks, excTracks)
 		runtime.Gosched()
 	}
+	uniqueTracks := make([]trackIDta, 0)
+	acc := 0
 	for range srcPlaylists.Playlists {
-		tracksMap := <-tracksMaps
-		acc += len(tracksMap)
-		if uniqueTracks.TracksMap == nil {
-			uniqueTracks.TracksMap = tracksMap
-			continue
-		}
-		for tid, ta := range tracksMap {
-			uniqueTracks.add(&tid, &ta)
-		}
+		srcTracks := <-plTracks
+		uniqueTracks = addUniqueTracks(uniqueTracks, srcTracks, excTracks)
+		acc += len(srcTracks)
 	}
-	wg.Wait()
-	done <- 1
+	stopRateLimiter <- 1
 	log.Println("Done getting unique tracks.")
 	fmt.Println(acc)
 	return uniqueTracks
 }
 
-func rateLimiter(limiter chan int, done chan int) {
-	const initBurst int = 5
+func rateLimiter(limiter chan int, stop chan int) {
+	const initBurst int = 7
 	for i := 0; i < initBurst; i++ {
 		limiter <- 1
 	}
-	for range time.Tick(90 * time.Millisecond) {
+	for range time.Tick(77 * time.Millisecond) {
 		select {
-		case <-done:
+		case <-stop:
 			return
 		default:
 			limiter <- 1
@@ -177,42 +176,133 @@ func rateLimiter(limiter chan int, done chan int) {
 	}
 }
 
-func (cu *clientUser) playlistTracksFetcher(wg *sync.WaitGroup, ratelimiter chan int,
-	plid spotify.ID, tracksMaps chan (map[spotify.ID]titleArtists),
-	excTracks *tracksContainer) {
-	defer wg.Done()
-	var offset, limit, total int
+func (cu *clientUser) fetchPlaylistTracks(ratelimiter chan int, plid spotify.ID,
+	plTracks chan []trackIDta, excTracks []trackIDta) {
+	offset, limit := 0, 100
 	var opt spotify.Options
 	opt.Offset = &offset
 	opt.Limit = &limit
 	fields := "items.track(id, name, artists.id), total"
-	var ta titleArtists
-	var uniqueTracks tracksContainer
-	uniqueTracks.TracksMap = make(map[spotify.ID]titleArtists)
-	for offset, limit, total = 0, 100, 100; offset < total; offset += limit {
-		<-ratelimiter
-		plTrackPage, err := cu.client.GetPlaylistTracksOpt(cu.userID, plid, &opt, fields)
-		if err != nil {
-			log.Fatal(err)
+	<-ratelimiter
+	plTrackPage, err := cu.client.GetPlaylistTracksOpt(cu.userID, plid, &opt, fields)
+	if err != nil {
+		log.Fatal(err)
+	}
+	total := plTrackPage.Total
+	nPages := total / limit
+	if total%limit > 0 {
+		nPages++
+	}
+	pgTracks := make(chan []trackIDta, nPages)
+	go getTracksFromPage(pgTracks, plTrackPage.Tracks)
+	for offset = limit; offset < total; offset += limit {
+		go cu.fetchPlaylistTracksByPage(ratelimiter, pgTracks, plid, offset, limit, &fields)
+	}
+	uniqueTracks := make([]trackIDta, 0)
+	var pgTrack []trackIDta
+	for i := 0; i < nPages; i++ {
+		pgTrack = <-pgTracks
+		uniqueTracks = addUniqueTracks(uniqueTracks, pgTrack, excTracks)
+	}
+	plTracks <- uniqueTracks
+	//log.Println("Fetched", plid)
+}
+
+func (cu *clientUser) fetchPlaylistTracksByPage(ratelimiter chan int,
+	pgTracks chan []trackIDta, plid spotify.ID, offset int, limit int, fields *string) {
+	var opt spotify.Options
+	opt.Offset = &offset
+	opt.Limit = &limit
+	<-ratelimiter
+	plTrackPage, err := cu.client.GetPlaylistTracksOpt(cu.userID, plid, &opt, *fields)
+	if err != nil {
+		log.Fatal(err)
+	}
+	go getTracksFromPage(pgTracks, plTrackPage.Tracks)
+}
+
+func getTracksFromPage(pgTracks chan []trackIDta, pageTracks []spotify.PlaylistTrack) {
+	tracks := make([]trackIDta, len(pageTracks))
+	var track trackIDta
+	for i, tr := range pageTracks {
+		track.ta.Title = tr.Track.Name
+		track.ta.Artists = nil
+		for _, ar := range tr.Track.Artists {
+			track.ta.Artists = append(track.ta.Artists, ar.Name)
 		}
-		total = plTrackPage.Total
-		for _, tr := range plTrackPage.Tracks {
-			ta.Title = tr.Track.Name
-			ta.Artists = nil
-			for _, ar := range tr.Track.Artists {
-				ta.Artists = append(ta.Artists, ar.Name)
+		track.ID = tr.Track.ID
+		tracks[i] = track
+	}
+	pgTracks <- tracks
+}
+
+func addUniqueTracks(uniqueTracks []trackIDta, srcTracks []trackIDta,
+	excTracks []trackIDta) []trackIDta {
+	const interval = 600
+	acc := 0
+	n := len(uniqueTracks)
+	if excTracks != nil {
+		for _, track := range srcTracks {
+			if !tracksContain(excTracks, track) {
+				uniqueTracks = tracksAdd(uniqueTracks, track)
 			}
-			if excTracks != nil {
-				if !excTracks.contains(&tr.Track.ID, &ta) {
-					uniqueTracks.add(&tr.Track.ID, &ta)
-				}
-			} else {
-				uniqueTracks.add(&tr.Track.ID, &ta)
+			acc += n
+			if acc > interval {
+				acc -= interval
+				runtime.Gosched()
+			}
+		}
+	} else {
+		for _, track := range srcTracks {
+			uniqueTracks = tracksAdd(uniqueTracks, track)
+			acc += n
+			if acc > interval {
+				acc -= interval
+				runtime.Gosched()
 			}
 		}
 	}
-	//log.Println("Fetched", plid)
-	tracksMaps <- uniqueTracks.TracksMap
+	return uniqueTracks
+}
+
+func tracksContain(tracks []trackIDta, newTrack trackIDta) bool {
+	for _, tr := range tracks {
+		if tr.ID == newTrack.ID {
+			return true
+		}
+		if tr.ta.Title == newTrack.ta.Title {
+			nArtists := len(tr.ta.Artists)
+			if nArtists != len(newTrack.ta.Artists) {
+				continue
+			}
+			artists := make([]string, nArtists)
+			ntArtists := make([]string, nArtists)
+			copy(artists, tr.ta.Artists)
+			copy(ntArtists, newTrack.ta.Artists)
+			for match := true; match == true; {
+				match = false
+				for i, artist := range artists {
+					if ntArtists[0] == artist {
+						artists = append(artists[:i], artists[i+1:]...)
+						ntArtists = ntArtists[1:]
+						match = true
+						break
+					}
+				}
+			}
+			if len(artists) == 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func tracksAdd(tracks []trackIDta, track trackIDta) []trackIDta {
+	if !tracksContain(tracks, track) {
+		return append(tracks, track)
+	}
+	return tracks
 }
 
 func (uniqueTracks *tracksContainer) contains(tid *spotify.ID, ta *titleArtists) bool {
@@ -323,8 +413,7 @@ func (cu *clientUser) getPlaylistTrackIDs(plid spotify.ID) ([]spotify.ID, error)
 	return trackIDs, nil
 }
 
-func (cu *clientUser) replacePlaylistWithNTracks(plid spotify.ID, trCon *tracksContainer, n int) {
-	log.Println("Replacing playlist tracks...")
+func getNTrackIDsFromTracksContainer(trCon *tracksContainer, n int) []spotify.ID {
 	size := len(trCon.TracksMap)
 	if size < n {
 		n = size
@@ -332,11 +421,35 @@ func (cu *clientUser) replacePlaylistWithNTracks(plid spotify.ID, trCon *tracksC
 	trackIDs := make([]spotify.ID, n)
 	i := 0
 	for k := range trCon.TracksMap {
-		trackIDs[i] = k
-		if i++; i >= n {
+		if i < n {
+			trackIDs[i] = k
+			i++
+		} else {
 			break
 		}
 	}
+	return trackIDs
+}
+
+func getNTrackIDsFromTrackIDtaSlice(tracks []trackIDta, n int) []spotify.ID {
+	size := len(tracks)
+	if size < n {
+		n = size
+	}
+	trackIDs := make([]spotify.ID, n)
+	for i, tr := range tracks {
+		if i < n {
+			trackIDs[i] = tr.ID
+		} else {
+			break
+		}
+	}
+	return trackIDs
+}
+
+func (cu *clientUser) replacePlaylistTracks(plid spotify.ID, trackIDs []spotify.ID) {
+	log.Println("Replacing playlist tracks...")
+
 	err := cu.client.ReplacePlaylistTracks(cu.userID, plid, trackIDs...)
 	if err != nil {
 		log.Fatal(err)
