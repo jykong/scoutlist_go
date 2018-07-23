@@ -238,7 +238,7 @@ func getTracksFromPage(pgTracks chan []trackIDta, pageTracks []spotify.PlaylistT
 
 func addUniqueTracks(uniqueTracks []trackIDta, srcTracks []trackIDta,
 	excTracks []trackIDta) []trackIDta {
-	const interval = 600
+	const interval = 7000
 	acc := 0
 	n := len(uniqueTracks)
 	if excTracks != nil {
