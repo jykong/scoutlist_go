@@ -243,8 +243,8 @@ func addUniqueTracks(uniqueTracks []trackIDta, srcTracks []trackIDta,
 	n := len(uniqueTracks)
 	if excTracks != nil {
 		for _, track := range srcTracks {
-			if !tracksContain(excTracks, track) {
-				uniqueTracks = tracksAdd(uniqueTracks, track)
+			if !tracksContain(excTracks, &track) {
+				uniqueTracks = tracksAdd(uniqueTracks, &track)
 			}
 			acc += n
 			if acc > interval {
@@ -254,7 +254,7 @@ func addUniqueTracks(uniqueTracks []trackIDta, srcTracks []trackIDta,
 		}
 	} else {
 		for _, track := range srcTracks {
-			uniqueTracks = tracksAdd(uniqueTracks, track)
+			uniqueTracks = tracksAdd(uniqueTracks, &track)
 			acc += n
 			if acc > interval {
 				acc -= interval
@@ -265,32 +265,30 @@ func addUniqueTracks(uniqueTracks []trackIDta, srcTracks []trackIDta,
 	return uniqueTracks
 }
 
-func tracksContain(tracks []trackIDta, newTrack trackIDta) bool {
-	for _, tr := range tracks {
-		if tr.ID == newTrack.ID {
+func tracksContain(tracks []trackIDta, newTrack *trackIDta) bool {
+	for i := 0; i < len(tracks); i++ {
+		if tracks[i].ID == newTrack.ID {
 			return true
 		}
-		if tr.ta.Title == newTrack.ta.Title {
-			nArtists := len(tr.ta.Artists)
+		if tracks[i].ta.Title == newTrack.ta.Title {
+			nArtists := len(tracks[i].ta.Artists)
 			if nArtists != len(newTrack.ta.Artists) {
 				continue
 			}
-			artists := make([]string, nArtists)
-			ntArtists := make([]string, nArtists)
-			copy(artists, tr.ta.Artists)
-			copy(ntArtists, newTrack.ta.Artists)
-			for match := true; match == true; {
+			match := true
+			for _, artist := range tracks[i].ta.Artists {
 				match = false
-				for i, artist := range artists {
-					if ntArtists[0] == artist {
-						artists = append(artists[:i], artists[i+1:]...)
-						ntArtists = ntArtists[1:]
+				for _, ntArtist := range newTrack.ta.Artists {
+					if artist == ntArtist {
 						match = true
 						break
 					}
 				}
+				if match == false {
+					break
+				}
 			}
-			if len(artists) == 0 {
+			if match == true {
 				return true
 			}
 		}
@@ -298,9 +296,9 @@ func tracksContain(tracks []trackIDta, newTrack trackIDta) bool {
 	return false
 }
 
-func tracksAdd(tracks []trackIDta, track trackIDta) []trackIDta {
+func tracksAdd(tracks []trackIDta, track *trackIDta) []trackIDta {
 	if !tracksContain(tracks, track) {
-		return append(tracks, track)
+		return append(tracks, *track)
 	}
 	return tracks
 }
