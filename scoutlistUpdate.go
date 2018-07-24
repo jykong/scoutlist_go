@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"math/rand"
 	"runtime"
 	"time"
 
@@ -60,7 +61,8 @@ func scoutlistUpdate(cu *clientUser) {
 
 	incPlaylists := loadPlaylistsFromJSON(incPlaylistPath)
 
-	filteredTracks := cu.getUniqueTracksFromPlaylists(rateLimit, incPlaylists, excTracks)
+	const lastN = 20
+	filteredTracks := cu.getUniqueTracksFromPlaylists(rateLimit, incPlaylists, excTracks, lastN)
 	fmt.Println(len(filteredTracks))
 	//fmt.Println(filteredTracks)
 
@@ -71,7 +73,8 @@ func scoutlistUpdate(cu *clientUser) {
 	scoutlistID, scoutedlistID = cu.recycleScoutlist(scoutlistID, scoutedlistID)
 	saveIDToGob(scoutlistIDPath, &scoutlistID)
 	saveIDToGob(scoutedlistIDPath, &scoutedlistID)
-	trackIDs := getNTrackIDsFromTrackIDTASlice(filteredTracks, 30)
+	trackIDs := getNTrackIDsFromTrackIDTASlice(filteredTracks, lastN, true)
+	//fmt.Println(trackIDs)
 	cu.replacePlaylistTracks(scoutlistID, trackIDs)
 }
 
@@ -102,14 +105,20 @@ func (cu *clientUser) getPlaylists() []playlistEntry {
 }
 
 func (cu *clientUser) getUniqueTracksFromPlaylists(rateLimit chan int,
-	srcPlaylists []playlistEntry, excTracks []trackIDTA) []trackIDTA {
+	srcPlaylists []playlistEntry, excTracks []trackIDTA, lastN int) []trackIDTA {
 	log.Println("Getting unique tracks from playlists...")
 	nPlaylists := len(srcPlaylists)
 	plTracks := make(chan []trackIDTA, nPlaylists)
 	for i := 0; i < nPlaylists; i++ {
-		go func(plid spotify.ID) {
-			plTracks <- cu.fetchPlaylistTracks(rateLimit, plid, excTracks)
-		}(srcPlaylists[i].ID)
+		if lastN > 0 {
+			go func(plid spotify.ID) {
+				plTracks <- cu.fetchLastNPlaylistTracks(rateLimit, plid, excTracks, lastN)
+			}(srcPlaylists[i].ID)
+		} else {
+			go func(plid spotify.ID) {
+				plTracks <- cu.fetchPlaylistTracks(rateLimit, plid, excTracks)
+			}(srcPlaylists[i].ID)
+		}
 		runtime.Gosched()
 	}
 	uniqueTracks := make([]trackIDTA, 0)
@@ -153,6 +162,36 @@ func (cu *clientUser) fetchPlaylistTracks(rateLimit chan int, plid spotify.ID,
 	for i := 0; i < nPages; i++ {
 		pgTrack = <-pgTracks
 		uniqueTracks = addUniqueTracks(uniqueTracks, pgTrack, excTracks)
+	}
+	//log.Println("Fetched", plid)
+	return uniqueTracks
+}
+
+func (cu *clientUser) fetchLastNPlaylistTracks(rateLimit chan int, plid spotify.ID,
+	excTracks []trackIDTA, lastN int) []trackIDTA {
+	offset, limit := 0, 100
+	var opt spotify.Options
+	opt.Offset = &offset
+	opt.Limit = &limit
+	fields := "items.track(id, name, artists.id), total"
+	<-rateLimit
+	plTrackPage, err := cu.client.GetPlaylistTracksOpt(cu.userID, plid, &opt, fields)
+	if err != nil {
+		log.Fatal(err)
+	}
+	total := plTrackPage.Total
+	var pgTrack []trackIDTA
+	uniqueTracks := make([]trackIDTA, 0)
+	for offset = (total - total%limit); offset >= 0; offset -= limit {
+		if offset > 0 {
+			pgTrack = cu.fetchPlaylistTracksByPage(rateLimit, plid, offset, limit, &fields)
+		} else {
+			pgTrack = getTracksFromPage(plTrackPage.Tracks)
+		}
+		uniqueTracks = addUniqueTracks(uniqueTracks, pgTrack, excTracks)
+		if len(uniqueTracks) >= lastN {
+			break
+		}
 	}
 	//log.Println("Fetched", plid)
 	return uniqueTracks
@@ -321,17 +360,39 @@ func (cu *clientUser) getPlaylistTrackIDs(plid spotify.ID) ([]spotify.ID, error)
 	return trackIDs, nil
 }
 
-func getNTrackIDsFromTrackIDTASlice(tracks []trackIDTA, n int) []spotify.ID {
+func getNTrackIDsFromTrackIDTASlice(tracks []trackIDTA, n int, random bool) []spotify.ID {
 	size := len(tracks)
 	if size < n {
 		n = size
 	}
 	trackIDs := make([]spotify.ID, n)
-	for i, tr := range tracks {
-		if i < n {
-			trackIDs[i] = tr.ID
-		} else {
-			break
+	if random {
+		s := rand.NewSource(time.Now().UnixNano())
+		r := rand.New(s)
+		var alreadyGen bool
+		genNums := make([]int, n)
+		for i := 0; i < n; {
+			alreadyGen = false
+			rn := r.Intn(size)
+			for j := 0; j < i; j++ {
+				if rn == genNums[j] {
+					alreadyGen = true
+					break
+				}
+			}
+			if !alreadyGen {
+				genNums[i] = rn
+				trackIDs[i] = tracks[rn].ID
+				i++
+			}
+		}
+	} else {
+		for i, tr := range tracks {
+			if i < n {
+				trackIDs[i] = tr.ID
+			} else {
+				break
+			}
 		}
 	}
 	return trackIDs
