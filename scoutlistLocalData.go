@@ -19,6 +19,9 @@ const scoutedlistIDPath = "./scoutedlist_id.gob"
 type playlistsStruct struct {
 	Playlists []playlistEntry
 }
+type tracksStruct struct {
+	Tracks []trackIDTA
+}
 
 func savePlaylistsToJSON(filePath string, playlists []playlistEntry) {
 	os.Remove(filePath)
@@ -55,7 +58,7 @@ func loadPlaylistsFromJSON(filePath string) []playlistEntry {
 	return plStruct.Playlists
 }
 
-func saveTracksToGob(filePath string, tracks *tracksContainer) {
+func saveTracksToGob(filePath string, tracks []trackIDTA) {
 	os.Remove(filePath)
 	file, err := os.Create(filePath)
 	if err != nil {
@@ -63,26 +66,29 @@ func saveTracksToGob(filePath string, tracks *tracksContainer) {
 	}
 	defer file.Close()
 	encoder := gob.NewEncoder(file)
-	err = encoder.Encode(*tracks)
+	trStruct := tracksStruct{
+		tracks,
+	}
+	err = encoder.Encode(trStruct)
 	if err != nil {
 		log.Fatal(err)
 	}
 	log.Println("Saved tracks to", filePath)
 }
 
-func loadTracksFromGob(filePath string) tracksContainer {
+func loadTracksFromGob(filePath string) []trackIDTA {
 	log.Println("Loading tracks from:", filePath)
 	file, err := os.Open(filePath)
 	if err != nil {
 		log.Fatal(err)
 	}
-	var tracks tracksContainer
+	trStruct := tracksStruct{}
 	decoder := gob.NewDecoder(file)
-	err = decoder.Decode(&tracks)
+	err = decoder.Decode(&trStruct)
 	if err != nil {
 		log.Fatal(err)
 	}
-	return tracks
+	return trStruct.Tracks
 }
 
 func saveIDToGob(filePath string, spid *spotify.ID) {
