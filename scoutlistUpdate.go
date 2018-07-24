@@ -28,6 +28,22 @@ type trackIDta struct {
 	ta titleArtists
 }
 
+const initBurst int = 10
+
+func rateLimiter(limiter chan int, stop chan int) {
+	for i := 0; i < initBurst; i++ {
+		limiter <- 1
+	}
+	for range time.Tick(76 * time.Millisecond) {
+		select {
+		case <-stop:
+			return
+		default:
+			limiter <- 1
+		}
+	}
+}
+
 func scoutlistUpdate(cu *clientUser) {
 	cu.client.AutoRetry = true
 
@@ -37,7 +53,12 @@ func scoutlistUpdate(cu *clientUser) {
 	excPlaylists := loadPlaylistsFromJSON(excPlaylistsPath)
 	//fmt.Println(excPlaylists)
 
-	excTracks := cu.getUniqueTracksFromPlaylistsAsync(&excPlaylists, nil)
+	rateLimit := make(chan int, initBurst)
+	stopRateLimiter := make(chan int, 1)
+	go rateLimiter(rateLimit, stopRateLimiter)
+	runtime.Gosched()
+
+	excTracks := cu.getUniqueTracksFromPlaylistsAsync(rateLimit, &excPlaylists, nil)
 	fmt.Println(len(excTracks))
 	//excTracks := cu.getUniqueTracksFromPlaylists(&excPlaylists, nil)
 	//saveTracksToGob(excTracksPath, &excTracks)
@@ -47,11 +68,13 @@ func scoutlistUpdate(cu *clientUser) {
 
 	incPlaylists := loadPlaylistsFromJSON(incPlaylistPath)
 
-	filteredTracks := cu.getUniqueTracksFromPlaylistsAsync(&incPlaylists, excTracks)
+	filteredTracks := cu.getUniqueTracksFromPlaylistsAsync(rateLimit, &incPlaylists, excTracks)
 	fmt.Println(len(filteredTracks))
 	//filteredTracks := cu.getUniqueTracksFromPlaylists(&incPlaylists, &excTracks)
 	//fmt.Println(len(filteredTracks.TracksMap))
 	//fmt.Println(filteredTracks)
+
+	stopRateLimiter <- 1
 
 	scoutlistID := loadIDFromGob(scoutlistIDPath)
 	scoutedlistID := loadIDFromGob(scoutedlistIDPath)
@@ -135,34 +158,14 @@ func (cu *clientUser) getUniqueTracksFromPlaylists(
 	return uniqueTracks
 }
 
-const initBurst int = 7
-
-func rateLimiter(limiter chan int, stop chan int) {
-	for i := 0; i < initBurst; i++ {
-		limiter <- 1
-	}
-	for range time.Tick(77 * time.Millisecond) {
-		select {
-		case <-stop:
-			return
-		default:
-			limiter <- 1
-		}
-	}
-}
-
-func (cu *clientUser) getUniqueTracksFromPlaylistsAsync(
+func (cu *clientUser) getUniqueTracksFromPlaylistsAsync(rateLimit chan int,
 	srcPlaylists *playlistsContainer, excTracks []trackIDta) []trackIDta {
 	log.Println("Getting unique tracks from playlists...")
-	ratelimiter := make(chan int, initBurst)
-	stopRateLimiter := make(chan int, 1)
-	go rateLimiter(ratelimiter, stopRateLimiter)
-	runtime.Gosched()
 
 	plTracks := make(chan []trackIDta, len(srcPlaylists.Playlists))
 	for _, pl := range srcPlaylists.Playlists {
 		go func(plid spotify.ID) {
-			plTracks <- cu.fetchPlaylistTracks(ratelimiter, plid, excTracks)
+			plTracks <- cu.fetchPlaylistTracks(rateLimit, plid, excTracks)
 		}(pl.ID)
 		runtime.Gosched()
 	}
@@ -173,20 +176,19 @@ func (cu *clientUser) getUniqueTracksFromPlaylistsAsync(
 		uniqueTracks = addUniqueTracks(uniqueTracks, srcTracks, excTracks)
 		acc += len(srcTracks)
 	}
-	stopRateLimiter <- 1
 	log.Println("Done getting unique tracks.")
 	fmt.Println(acc)
 	return uniqueTracks
 }
 
-func (cu *clientUser) fetchPlaylistTracks(ratelimiter chan int, plid spotify.ID,
+func (cu *clientUser) fetchPlaylistTracks(rateLimit chan int, plid spotify.ID,
 	excTracks []trackIDta) []trackIDta {
 	offset, limit := 0, 100
 	var opt spotify.Options
 	opt.Offset = &offset
 	opt.Limit = &limit
 	fields := "items.track(id, name, artists.id), total"
-	<-ratelimiter
+	<-rateLimit
 	plTrackPage, err := cu.client.GetPlaylistTracksOpt(cu.userID, plid, &opt, fields)
 	if err != nil {
 		log.Fatal(err)
@@ -199,7 +201,7 @@ func (cu *clientUser) fetchPlaylistTracks(ratelimiter chan int, plid spotify.ID,
 	pgTracks := make(chan []trackIDta, nPages)
 	for offset = limit; offset < total; offset += limit {
 		go func(offset int) {
-			pgTracks <- cu.fetchPlaylistTracksByPage(ratelimiter, plid, offset, limit, &fields)
+			pgTracks <- cu.fetchPlaylistTracksByPage(rateLimit, plid, offset, limit, &fields)
 		}(offset)
 	}
 	pgTracks <- getTracksFromPage(plTrackPage.Tracks)
@@ -213,12 +215,12 @@ func (cu *clientUser) fetchPlaylistTracks(ratelimiter chan int, plid spotify.ID,
 	return uniqueTracks
 }
 
-func (cu *clientUser) fetchPlaylistTracksByPage(ratelimiter chan int,
+func (cu *clientUser) fetchPlaylistTracksByPage(rateLimit chan int,
 	plid spotify.ID, offset int, limit int, fields *string) []trackIDta {
 	var opt spotify.Options
 	opt.Offset = &offset
 	opt.Limit = &limit
-	<-ratelimiter
+	<-rateLimit
 	plTrackPage, err := cu.client.GetPlaylistTracksOpt(cu.userID, plid, &opt, *fields)
 	if err != nil {
 		log.Fatal(err)
