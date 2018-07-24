@@ -42,12 +42,12 @@ func rateLimiter(limiter chan int, stop chan int) {
 func scoutlistUpdate(cu *clientUser) {
 	cu.client.AutoRetry = true
 
-	strCon := getStringConsts("user_test")
+	strCon := getStringConsts("code_test")
 
 	//playlists := cu.getPlaylists()
-	//savePlaylistsToJSON(playlistsPath, playlists)
+	//savePlaylistsToJSON(strCon.PlaylistsPath, playlists)
 
-	//excPlaylists := loadPlaylistsFromJSON(excPlaylistsPath)
+	//excPlaylists := loadPlaylistsFromJSON(strCon.ExcPlaylistsPath)
 	//fmt.Println(excPlaylists)
 
 	rateLimit := make(chan int, initBurst)
@@ -56,7 +56,7 @@ func scoutlistUpdate(cu *clientUser) {
 	runtime.Gosched()
 
 	//excTracks := cu.getUniqueTracksFromPlaylists(rateLimit, excPlaylists, nil)
-	//saveTracksToGob(excTracksPath, excTracks)
+	//saveTracksToGob(strCon.ExcTracksPath, excTracks)
 	excTracks := loadTracksFromGob(strCon.ExcTracksPath)
 	fmt.Println(len(excTracks))
 	//fmt.Println(excTracks)
@@ -77,7 +77,8 @@ func scoutlistUpdate(cu *clientUser) {
 	saveIDToGob(strCon.ScoutlistIDPath, &scoutlistID)
 	saveIDToGob(strCon.ScoutedlistIDPath, &scoutedlistID)
 
-	cu.recycleScoutlist(scoutlistID, scoutedlistID)
+	excTracks = cu.recycleScoutlist(scoutlistID, scoutedlistID, excTracks)
+	saveTracksToGob(strCon.ExcTracksPath, excTracks)
 	trackIDs := getNTrackIDsFromTrackIDTASlice(filteredTracks, lastN, true)
 	//fmt.Println(trackIDs)
 	cu.replacePlaylistTracks(scoutlistID, trackIDs)
@@ -145,7 +146,9 @@ func (cu *clientUser) fetchPlaylistTracks(rateLimit chan int, plid spotify.ID,
 	opt.Offset = &offset
 	opt.Limit = &limit
 	fields := "items.track(id, name, artists.id), total"
-	<-rateLimit
+	if rateLimit != nil {
+		<-rateLimit
+	}
 	plTrackPage, err := cu.client.GetPlaylistTracksOpt(cu.userID, plid, &opt, fields)
 	if err != nil {
 		log.Fatal(err)
@@ -179,7 +182,9 @@ func (cu *clientUser) fetchLastNPlaylistTracks(rateLimit chan int, plid spotify.
 	opt.Offset = &offset
 	opt.Limit = &limit
 	fields := "items.track(id, name, artists.id), total"
-	<-rateLimit
+	if rateLimit != nil {
+		<-rateLimit
+	}
 	plTrackPage, err := cu.client.GetPlaylistTracksOpt(cu.userID, plid, &opt, fields)
 	if err != nil {
 		log.Fatal(err)
@@ -207,7 +212,9 @@ func (cu *clientUser) fetchPlaylistTracksByPage(rateLimit chan int,
 	var opt spotify.Options
 	opt.Offset = &offset
 	opt.Limit = &limit
-	<-rateLimit
+	if rateLimit != nil {
+		<-rateLimit
+	}
 	plTrackPage, err := cu.client.GetPlaylistTracksOpt(cu.userID, plid, &opt, *fields)
 	if err != nil {
 		log.Fatal(err)
@@ -310,19 +317,31 @@ func (cu *clientUser) checkAndCreatePlaylist(plid spotify.ID, plname string) spo
 	return plid
 }
 
-func (cu *clientUser) recycleScoutlist(
-	scoutlistID spotify.ID, scoutedlistID spotify.ID) {
-	scoutlistTrackIDs, err := cu.getPlaylistTrackIDs(scoutlistID)
-	if err != nil {
-		log.Fatal(err)
-	}
-	if len(scoutlistTrackIDs) > 0 {
-		// Maybe TODO: modify this to add only unique tracks
-		_, err = cu.client.AddTracksToPlaylist(cu.userID, scoutedlistID, scoutlistTrackIDs...)
+func (cu *clientUser) recycleScoutlist(scoutlistID spotify.ID, scoutedlistID spotify.ID,
+	excTracks []trackIDTA) []trackIDTA {
+	if excTracks == nil {
+		scoutlistTrackIDs, err := cu.getPlaylistTrackIDs(scoutlistID)
 		if err != nil {
 			log.Fatal(err)
 		}
+		if len(scoutlistTrackIDs) > 0 {
+			_, err = cu.client.AddTracksToPlaylist(cu.userID, scoutedlistID, scoutlistTrackIDs...)
+			if err != nil {
+				log.Fatal(err)
+			}
+		}
+	} else {
+		scoutlistTracks := cu.fetchPlaylistTracks(nil, scoutlistID, nil)
+		if len(scoutlistTracks) > 0 {
+			scoutlistTrackIDs := getNTrackIDsFromTrackIDTASlice(scoutlistTracks, -1, false)
+			_, err := cu.client.AddTracksToPlaylist(cu.userID, scoutedlistID, scoutlistTrackIDs...)
+			if err != nil {
+				log.Fatal(err)
+			}
+			excTracks = addUniqueTracks(excTracks, scoutlistTracks, nil)
+		}
 	}
+	return excTracks
 }
 
 func (cu *clientUser) createPlaylist(scoutlistID spotify.ID, s string) spotify.ID {
@@ -360,7 +379,7 @@ func (cu *clientUser) getPlaylistTrackIDs(plid spotify.ID) ([]spotify.ID, error)
 
 func getNTrackIDsFromTrackIDTASlice(tracks []trackIDTA, n int, random bool) []spotify.ID {
 	size := len(tracks)
-	if size < n {
+	if size < n || n == -1 {
 		n = size
 	}
 	trackIDs := make([]spotify.ID, n)
