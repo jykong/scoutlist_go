@@ -135,10 +135,26 @@ func (cu *clientUser) getUniqueTracksFromPlaylists(
 	return uniqueTracks
 }
 
+const initBurst int = 7
+
+func rateLimiter(limiter chan int, stop chan int) {
+	for i := 0; i < initBurst; i++ {
+		limiter <- 1
+	}
+	for range time.Tick(77 * time.Millisecond) {
+		select {
+		case <-stop:
+			return
+		default:
+			limiter <- 1
+		}
+	}
+}
+
 func (cu *clientUser) getUniqueTracksFromPlaylistsAsync(
 	srcPlaylists *playlistsContainer, excTracks []trackIDta) []trackIDta {
 	log.Println("Getting unique tracks from playlists...")
-	ratelimiter := make(chan int, 5)
+	ratelimiter := make(chan int, initBurst)
 	stopRateLimiter := make(chan int, 1)
 	go rateLimiter(ratelimiter, stopRateLimiter)
 	runtime.Gosched()
@@ -159,21 +175,6 @@ func (cu *clientUser) getUniqueTracksFromPlaylistsAsync(
 	log.Println("Done getting unique tracks.")
 	fmt.Println(acc)
 	return uniqueTracks
-}
-
-func rateLimiter(limiter chan int, stop chan int) {
-	const initBurst int = 7
-	for i := 0; i < initBurst; i++ {
-		limiter <- 1
-	}
-	for range time.Tick(77 * time.Millisecond) {
-		select {
-		case <-stop:
-			return
-		default:
-			limiter <- 1
-		}
-	}
 }
 
 func (cu *clientUser) fetchPlaylistTracks(ratelimiter chan int, plid spotify.ID,
