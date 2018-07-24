@@ -97,17 +97,14 @@ func (cu *clientUser) getPlaylists() []playlistEntry {
 		}
 		if playlists == nil {
 			total = playlistsPage.Total
-			playlists = make([]playlistEntry, 0, total)
+			playlists = make([]playlistEntry, total)
 		}
 		var plEntry playlistEntry
-		for _, pl := range playlistsPage.Playlists {
+		for i, pl := range playlistsPage.Playlists {
 			plEntry.ID = pl.ID
 			plEntry.Name = pl.Name
-			playlists = append(playlists, plEntry)
+			playlists[offset+i] = plEntry
 		}
-		//for i, pl := range playlistsPage.Playlists {
-		//	fmt.Printf("%03d) %s %s\n", offset+i, pl.ID, pl.Name)
-		//}
 	}
 	return playlists
 }
