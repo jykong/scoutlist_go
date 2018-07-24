@@ -161,7 +161,9 @@ func (cu *clientUser) getUniqueTracksFromPlaylistsAsync(
 
 	plTracks := make(chan []trackIDta, len(srcPlaylists.Playlists))
 	for _, pl := range srcPlaylists.Playlists {
-		go cu.fetchPlaylistTracks(ratelimiter, pl.ID, plTracks, excTracks)
+		go func(plid spotify.ID) {
+			plTracks <- cu.fetchPlaylistTracks(ratelimiter, plid, excTracks)
+		}(pl.ID)
 		runtime.Gosched()
 	}
 	uniqueTracks := make([]trackIDta, 0)
@@ -178,7 +180,7 @@ func (cu *clientUser) getUniqueTracksFromPlaylistsAsync(
 }
 
 func (cu *clientUser) fetchPlaylistTracks(ratelimiter chan int, plid spotify.ID,
-	plTracks chan []trackIDta, excTracks []trackIDta) {
+	excTracks []trackIDta) []trackIDta {
 	offset, limit := 0, 100
 	var opt spotify.Options
 	opt.Offset = &offset
@@ -195,22 +197,24 @@ func (cu *clientUser) fetchPlaylistTracks(ratelimiter chan int, plid spotify.ID,
 		nPages++
 	}
 	pgTracks := make(chan []trackIDta, nPages)
-	go getTracksFromPage(pgTracks, plTrackPage.Tracks)
 	for offset = limit; offset < total; offset += limit {
-		go cu.fetchPlaylistTracksByPage(ratelimiter, pgTracks, plid, offset, limit, &fields)
+		go func(offset int) {
+			pgTracks <- cu.fetchPlaylistTracksByPage(ratelimiter, plid, offset, limit, &fields)
+		}(offset)
 	}
+	pgTracks <- getTracksFromPage(plTrackPage.Tracks)
 	uniqueTracks := make([]trackIDta, 0)
 	var pgTrack []trackIDta
 	for i := 0; i < nPages; i++ {
 		pgTrack = <-pgTracks
 		uniqueTracks = addUniqueTracks(uniqueTracks, pgTrack, excTracks)
 	}
-	plTracks <- uniqueTracks
 	//log.Println("Fetched", plid)
+	return uniqueTracks
 }
 
 func (cu *clientUser) fetchPlaylistTracksByPage(ratelimiter chan int,
-	pgTracks chan []trackIDta, plid spotify.ID, offset int, limit int, fields *string) {
+	plid spotify.ID, offset int, limit int, fields *string) []trackIDta {
 	var opt spotify.Options
 	opt.Offset = &offset
 	opt.Limit = &limit
@@ -219,10 +223,10 @@ func (cu *clientUser) fetchPlaylistTracksByPage(ratelimiter chan int,
 	if err != nil {
 		log.Fatal(err)
 	}
-	go getTracksFromPage(pgTracks, plTrackPage.Tracks)
+	return getTracksFromPage(plTrackPage.Tracks)
 }
 
-func getTracksFromPage(pgTracks chan []trackIDta, pageTracks []spotify.PlaylistTrack) {
+func getTracksFromPage(pageTracks []spotify.PlaylistTrack) []trackIDta {
 	tracks := make([]trackIDta, len(pageTracks))
 	var track trackIDta
 	for i, tr := range pageTracks {
@@ -234,7 +238,7 @@ func getTracksFromPage(pgTracks chan []trackIDta, pageTracks []spotify.PlaylistT
 		track.ID = tr.Track.ID
 		tracks[i] = track
 	}
-	pgTracks <- tracks
+	return tracks
 }
 
 func addUniqueTracks(uniqueTracks []trackIDta, srcTracks []trackIDta,
