@@ -13,9 +13,6 @@ type playlistEntry struct {
 	ID   spotify.ID `json:"id"`
 	Name string     `json:"name"`
 }
-type playlistsContainer struct {
-	Playlists []playlistEntry `json:"items"`
-}
 type titleArtists struct {
 	Title   string
 	Artists []string
@@ -48,7 +45,7 @@ func scoutlistUpdate(cu *clientUser) {
 	cu.client.AutoRetry = true
 
 	//playlists := cu.getPlaylists()
-	//savePlaylistsToJSON(playlistsPath, &playlists)
+	//savePlaylistsToJSON(playlistsPath, playlists)
 
 	excPlaylists := loadPlaylistsFromJSON(excPlaylistsPath)
 	//fmt.Println(excPlaylists)
@@ -58,9 +55,9 @@ func scoutlistUpdate(cu *clientUser) {
 	go rateLimiter(rateLimit, stopRateLimiter)
 	runtime.Gosched()
 
-	excTracks := cu.getUniqueTracksFromPlaylistsAsync(rateLimit, &excPlaylists, nil)
+	excTracks := cu.getUniqueTracksFromPlaylistsAsync(rateLimit, excPlaylists, nil)
 	fmt.Println(len(excTracks))
-	//excTracks := cu.getUniqueTracksFromPlaylists(&excPlaylists, nil)
+	//excTracks := cu.getUniqueTracksFromPlaylists(excPlaylists, nil)
 	//saveTracksToGob(excTracksPath, &excTracks)
 	//excTracks := loadTracksFromGob(excTracksPath)
 	//fmt.Println(len(excTracks.TracksMap))
@@ -68,9 +65,9 @@ func scoutlistUpdate(cu *clientUser) {
 
 	incPlaylists := loadPlaylistsFromJSON(incPlaylistPath)
 
-	filteredTracks := cu.getUniqueTracksFromPlaylistsAsync(rateLimit, &incPlaylists, excTracks)
+	filteredTracks := cu.getUniqueTracksFromPlaylistsAsync(rateLimit, incPlaylists, excTracks)
 	fmt.Println(len(filteredTracks))
-	//filteredTracks := cu.getUniqueTracksFromPlaylists(&incPlaylists, &excTracks)
+	//filteredTracks := cu.getUniqueTracksFromPlaylists(incPlaylists, &excTracks)
 	//fmt.Println(len(filteredTracks.TracksMap))
 	//fmt.Println(filteredTracks)
 
@@ -86,7 +83,7 @@ func scoutlistUpdate(cu *clientUser) {
 	cu.replacePlaylistTracks(scoutlistID, trackIDs)
 }
 
-func (cu *clientUser) getPlaylists() playlistsContainer {
+func (cu *clientUser) getPlaylists() []playlistEntry {
 	log.Println("Getting user playlists")
 	offset, limit := 0, 50
 	var opt spotify.Options
@@ -112,13 +109,11 @@ func (cu *clientUser) getPlaylists() playlistsContainer {
 		//	fmt.Printf("%03d) %s %s\n", offset+i, pl.ID, pl.Name)
 		//}
 	}
-	var plCon playlistsContainer
-	plCon.Playlists = playlists
-	return plCon
+	return playlists
 }
 
 func (cu *clientUser) getUniqueTracksFromPlaylists(
-	srcPlaylists *playlistsContainer, excTracks *tracksContainer) tracksContainer {
+	srcPlaylists []playlistEntry, excTracks *tracksContainer) tracksContainer {
 	log.Println("Getting unique tracks from playlists...")
 	var offset, limit, total int
 	var opt spotify.Options
@@ -129,7 +124,7 @@ func (cu *clientUser) getUniqueTracksFromPlaylists(
 	var uniqueTracks tracksContainer
 	uniqueTracks.TracksMap = make(map[spotify.ID]titleArtists)
 	acc := 0
-	for _, pl := range srcPlaylists.Playlists {
+	for _, pl := range srcPlaylists {
 		for offset, limit, total = 0, 100, 100; offset < total; offset += limit {
 			plTrackPage, err := cu.client.GetPlaylistTracksOpt(cu.userID, pl.ID, &opt, fields)
 			if err != nil {
@@ -159,19 +154,19 @@ func (cu *clientUser) getUniqueTracksFromPlaylists(
 }
 
 func (cu *clientUser) getUniqueTracksFromPlaylistsAsync(rateLimit chan int,
-	srcPlaylists *playlistsContainer, excTracks []trackIDta) []trackIDta {
+	srcPlaylists []playlistEntry, excTracks []trackIDta) []trackIDta {
 	log.Println("Getting unique tracks from playlists...")
-
-	plTracks := make(chan []trackIDta, len(srcPlaylists.Playlists))
-	for _, pl := range srcPlaylists.Playlists {
+	nPlaylists := len(srcPlaylists)
+	plTracks := make(chan []trackIDta, nPlaylists)
+	for i := 0; i < nPlaylists; i++ {
 		go func(plid spotify.ID) {
 			plTracks <- cu.fetchPlaylistTracks(rateLimit, plid, excTracks)
-		}(pl.ID)
+		}(srcPlaylists[i].ID)
 		runtime.Gosched()
 	}
 	uniqueTracks := make([]trackIDta, 0)
 	acc := 0
-	for range srcPlaylists.Playlists {
+	for i := 0; i < nPlaylists; i++ {
 		srcTracks := <-plTracks
 		uniqueTracks = addUniqueTracks(uniqueTracks, srcTracks, excTracks)
 		acc += len(srcTracks)

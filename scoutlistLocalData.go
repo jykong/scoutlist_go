@@ -16,9 +16,11 @@ const incPlaylistPath = "./inc_playlists.json"
 const scoutlistIDPath = "./scoutlist_id.gob"
 const scoutedlistIDPath = "./scoutedlist_id.gob"
 
-func savePlaylistsToJSON(filePath string, plCon *playlistsContainer) {
-	var encoder *json.Encoder
+type playlistsStruct struct {
+	Playlists []playlistEntry
+}
 
+func savePlaylistsToJSON(filePath string, playlists []playlistEntry) {
 	os.Remove(filePath)
 
 	file, err := os.Create(filePath)
@@ -26,28 +28,31 @@ func savePlaylistsToJSON(filePath string, plCon *playlistsContainer) {
 		log.Fatal(err)
 	}
 	defer file.Close()
-	encoder = json.NewEncoder(file)
+	encoder := json.NewEncoder(file)
 	encoder.SetIndent("", "\t")
-	err = encoder.Encode(plCon)
+	plStruct := playlistsStruct{
+		playlists,
+	}
+	err = encoder.Encode(plStruct)
 	if err != nil {
 		log.Fatal(err)
 	}
 	log.Println("User playlists saved to", playlistsPath)
 }
 
-func loadPlaylistsFromJSON(filePath string) playlistsContainer {
+func loadPlaylistsFromJSON(filePath string) []playlistEntry {
 	log.Println("Loading playlists from", filePath)
 	file, err := os.Open(filePath)
 	if err != nil {
 		log.Fatal(err)
 	}
-	var plCon playlistsContainer
 	decoder := json.NewDecoder(file)
-	err = decoder.Decode(&plCon)
+	plStruct := playlistsStruct{}
+	err = decoder.Decode(&plStruct)
 	if err != nil {
 		log.Fatal(err)
 	}
-	return plCon
+	return plStruct.Playlists
 }
 
 func saveTracksToGob(filePath string, tracks *tracksContainer) {
