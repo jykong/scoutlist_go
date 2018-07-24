@@ -9,18 +9,48 @@ import (
 	"github.com/zmb3/spotify"
 )
 
-const playlistsPath = "./playlists.json"
-const excPlaylistsPath = "./exc_playlists.json"
-const excTracksPath = "./exc_tracks.gob"
-const incPlaylistPath = "./inc_playlists.json"
-const scoutlistIDPath = "./scoutlist_id.gob"
-const scoutedlistIDPath = "./scoutedlist_id.gob"
+type stringConsts struct {
+	PlaylistsPath     string
+	ExcPlaylistsPath  string
+	ExcTracksPath     string
+	IncPlaylistPath   string
+	ScoutlistIDPath   string
+	ScoutedlistIDPath string
+	ScoutlistName     string
+	ScoutedlistName   string
+}
 
 type playlistsStruct struct {
 	Playlists []playlistEntry
 }
 type tracksStruct struct {
 	Tracks []trackIDTA
+}
+
+func getStringConsts(mode string) stringConsts {
+	var strCon stringConsts
+	var pathPrefix string
+	var scoutlistPrefix string
+	switch mode {
+	case "code_test":
+		pathPrefix = "./code_test_data/"
+		scoutlistPrefix = "Test"
+	case "user_test":
+		pathPrefix = "./user_test_data/"
+		scoutlistPrefix = ""
+	default:
+		pathPrefix = ""
+		scoutlistPrefix = ""
+	}
+	strCon.PlaylistsPath = pathPrefix + "playlists.json"
+	strCon.ExcPlaylistsPath = pathPrefix + "exc_playlists.json"
+	strCon.ExcTracksPath = pathPrefix + "exc_tracks.gob"
+	strCon.IncPlaylistPath = pathPrefix + "inc_playlists.json"
+	strCon.ScoutlistIDPath = pathPrefix + "scoutlist_id.gob"
+	strCon.ScoutedlistIDPath = pathPrefix + "scoutedlist_id.gob"
+	strCon.ScoutlistName = scoutlistPrefix + "Scoutlist"
+	strCon.ScoutedlistName = scoutlistPrefix + "Scoutedlist"
+	return strCon
 }
 
 func savePlaylistsToJSON(filePath string, playlists []playlistEntry) {
@@ -40,7 +70,7 @@ func savePlaylistsToJSON(filePath string, playlists []playlistEntry) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Println("User playlists saved to", playlistsPath)
+	log.Println("User playlists saved to", filePath)
 }
 
 func loadPlaylistsFromJSON(filePath string) []playlistEntry {

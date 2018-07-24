@@ -42,6 +42,8 @@ func rateLimiter(limiter chan int, stop chan int) {
 func scoutlistUpdate(cu *clientUser) {
 	cu.client.AutoRetry = true
 
+	strCon := getStringConsts("user_test")
+
 	//playlists := cu.getPlaylists()
 	//savePlaylistsToJSON(playlistsPath, playlists)
 
@@ -55,11 +57,11 @@ func scoutlistUpdate(cu *clientUser) {
 
 	//excTracks := cu.getUniqueTracksFromPlaylists(rateLimit, excPlaylists, nil)
 	//saveTracksToGob(excTracksPath, excTracks)
-	excTracks := loadTracksFromGob(excTracksPath)
+	excTracks := loadTracksFromGob(strCon.ExcTracksPath)
 	fmt.Println(len(excTracks))
 	//fmt.Println(excTracks)
 
-	incPlaylists := loadPlaylistsFromJSON(incPlaylistPath)
+	incPlaylists := loadPlaylistsFromJSON(strCon.IncPlaylistPath)
 
 	const lastN = 20
 	filteredTracks := cu.getUniqueTracksFromPlaylists(rateLimit, incPlaylists, excTracks, lastN)
@@ -68,11 +70,14 @@ func scoutlistUpdate(cu *clientUser) {
 
 	stopRateLimiter <- 1
 
-	scoutlistID := loadIDFromGob(scoutlistIDPath)
-	scoutedlistID := loadIDFromGob(scoutedlistIDPath)
-	scoutlistID, scoutedlistID = cu.recycleScoutlist(scoutlistID, scoutedlistID)
-	saveIDToGob(scoutlistIDPath, &scoutlistID)
-	saveIDToGob(scoutedlistIDPath, &scoutedlistID)
+	scoutlistID := loadIDFromGob(strCon.ScoutlistIDPath)
+	scoutedlistID := loadIDFromGob(strCon.ScoutedlistIDPath)
+	scoutlistID = cu.checkAndCreatePlaylist(scoutlistID, strCon.ScoutlistName)
+	scoutedlistID = cu.checkAndCreatePlaylist(scoutedlistID, strCon.ScoutedlistName)
+	saveIDToGob(strCon.ScoutlistIDPath, &scoutlistID)
+	saveIDToGob(strCon.ScoutedlistIDPath, &scoutedlistID)
+
+	cu.recycleScoutlist(scoutlistID, scoutedlistID)
 	trackIDs := getNTrackIDsFromTrackIDTASlice(filteredTracks, lastN, true)
 	//fmt.Println(trackIDs)
 	cu.replacePlaylistTracks(scoutlistID, trackIDs)
@@ -292,27 +297,21 @@ func tracksAdd(tracks []trackIDTA, track *trackIDTA) []trackIDTA {
 	return tracks
 }
 
-func (cu *clientUser) recycleScoutlist(
-	scoutlistID spotify.ID, scoutedlistID spotify.ID) (spotify.ID, spotify.ID) {
-	if scoutlistID == "" {
-		return cu.createPlaylist(scoutlistID, "Scoutlist"), ""
+func (cu *clientUser) checkAndCreatePlaylist(plid spotify.ID, plname string) spotify.ID {
+	if plid == "" {
+		return cu.createPlaylist(plid, plname)
 	}
-	_, err := cu.client.GetPlaylist(cu.userID, scoutlistID)
+	_, err := cu.client.GetPlaylist(cu.userID, plid)
 	if err != nil {
 		// TODO: modify to examine # of followers & followers object
-		log.Println("Scoutlist not found on Spotify")
-		return cu.createPlaylist(scoutlistID, "Scoutlist"), ""
+		log.Println(plname + "not found on Spotify")
+		return cu.createPlaylist(plid, plname)
 	}
-	if scoutedlistID == "" {
-		scoutedlistID = cu.createPlaylist(scoutedlistID, "Scoutedlist")
-	} else {
-		_, err := cu.client.GetPlaylist(cu.userID, scoutedlistID)
-		if err != nil {
-			// TODO: modify to examine # of followers & followers object
-			log.Println("Scoutedlist not found on Spotify")
-			scoutedlistID = cu.createPlaylist(scoutedlistID, "Scoutedlist")
-		}
-	}
+	return plid
+}
+
+func (cu *clientUser) recycleScoutlist(
+	scoutlistID spotify.ID, scoutedlistID spotify.ID) {
 	scoutlistTrackIDs, err := cu.getPlaylistTrackIDs(scoutlistID)
 	if err != nil {
 		log.Fatal(err)
@@ -324,7 +323,6 @@ func (cu *clientUser) recycleScoutlist(
 			log.Fatal(err)
 		}
 	}
-	return scoutlistID, scoutedlistID
 }
 
 func (cu *clientUser) createPlaylist(scoutlistID spotify.ID, s string) spotify.ID {
