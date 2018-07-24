@@ -55,20 +55,16 @@ func scoutlistUpdate(cu *clientUser) {
 	go rateLimiter(rateLimit, stopRateLimiter)
 	runtime.Gosched()
 
-	excTracks := cu.getUniqueTracksFromPlaylistsAsync(rateLimit, excPlaylists, nil)
+	excTracks := cu.getUniqueTracksFromPlaylists(rateLimit, excPlaylists, nil)
 	fmt.Println(len(excTracks))
-	//excTracks := cu.getUniqueTracksFromPlaylists(excPlaylists, nil)
 	//saveTracksToGob(excTracksPath, &excTracks)
 	//excTracks := loadTracksFromGob(excTracksPath)
-	//fmt.Println(len(excTracks.TracksMap))
 	//fmt.Println(excTracks)
 
 	incPlaylists := loadPlaylistsFromJSON(incPlaylistPath)
 
-	filteredTracks := cu.getUniqueTracksFromPlaylistsAsync(rateLimit, incPlaylists, excTracks)
+	filteredTracks := cu.getUniqueTracksFromPlaylists(rateLimit, incPlaylists, excTracks)
 	fmt.Println(len(filteredTracks))
-	//filteredTracks := cu.getUniqueTracksFromPlaylists(incPlaylists, &excTracks)
-	//fmt.Println(len(filteredTracks.TracksMap))
 	//fmt.Println(filteredTracks)
 
 	stopRateLimiter <- 1
@@ -109,48 +105,7 @@ func (cu *clientUser) getPlaylists() []playlistEntry {
 	return playlists
 }
 
-func (cu *clientUser) getUniqueTracksFromPlaylists(
-	srcPlaylists []playlistEntry, excTracks *tracksContainer) tracksContainer {
-	log.Println("Getting unique tracks from playlists...")
-	var offset, limit, total int
-	var opt spotify.Options
-	opt.Offset = &offset
-	opt.Limit = &limit
-	fields := "items.track(id, name, artists.id), total"
-	var ta titleArtists
-	var uniqueTracks tracksContainer
-	uniqueTracks.TracksMap = make(map[spotify.ID]titleArtists)
-	acc := 0
-	for _, pl := range srcPlaylists {
-		for offset, limit, total = 0, 100, 100; offset < total; offset += limit {
-			plTrackPage, err := cu.client.GetPlaylistTracksOpt(cu.userID, pl.ID, &opt, fields)
-			if err != nil {
-				log.Fatal(err)
-			}
-			total = plTrackPage.Total
-			for _, tr := range plTrackPage.Tracks {
-				ta.Title = tr.Track.Name
-				ta.Artists = nil
-				for _, ar := range tr.Track.Artists {
-					ta.Artists = append(ta.Artists, ar.Name)
-				}
-				if excTracks != nil {
-					if !excTracks.contains(&tr.Track.ID, &ta) {
-						uniqueTracks.add(&tr.Track.ID, &ta)
-					}
-				} else {
-					uniqueTracks.add(&tr.Track.ID, &ta)
-				}
-			}
-		}
-		acc += total
-	}
-	log.Println("Done getting unique tracks.")
-	fmt.Println(acc)
-	return uniqueTracks
-}
-
-func (cu *clientUser) getUniqueTracksFromPlaylistsAsync(rateLimit chan int,
+func (cu *clientUser) getUniqueTracksFromPlaylists(rateLimit chan int,
 	srcPlaylists []playlistEntry, excTracks []trackIDta) []trackIDta {
 	log.Println("Getting unique tracks from playlists...")
 	nPlaylists := len(srcPlaylists)
@@ -300,46 +255,6 @@ func tracksAdd(tracks []trackIDta, track *trackIDta) []trackIDta {
 		return append(tracks, *track)
 	}
 	return tracks
-}
-
-func (uniqueTracks *tracksContainer) contains(tid *spotify.ID, ta *titleArtists) bool {
-	_, present := uniqueTracks.TracksMap[*tid]
-	if present == true {
-		return true
-	}
-	for _, uta := range uniqueTracks.TracksMap {
-		if ta.Title == uta.Title {
-			nArtists := len(ta.Artists)
-			if nArtists != len(uta.Artists) {
-				continue
-			}
-			uartists := make([]string, nArtists)
-			artists := make([]string, nArtists)
-			copy(uartists, uta.Artists)
-			copy(artists, ta.Artists)
-			for match := true; match == true; {
-				match = false
-				for i, uartist := range uartists {
-					if artists[0] == uartist {
-						uartists = append(uartists[:i], uartists[i+1:]...)
-						artists = artists[1:]
-						match = true
-						break
-					}
-				}
-			}
-			if len(artists) == 0 {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func (uniqueTracks *tracksContainer) add(tid *spotify.ID, ta *titleArtists) {
-	if uniqueTracks.contains(tid, ta) == false {
-		uniqueTracks.TracksMap[*tid] = *ta
-	}
 }
 
 func (cu *clientUser) recycleScoutlist(
