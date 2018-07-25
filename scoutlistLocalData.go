@@ -27,7 +27,7 @@ type tracksStruct struct {
 	Tracks []trackIDTA
 }
 
-func getStringConsts(mode int) stringConsts {
+func getStringConsts() stringConsts {
 	var strCon stringConsts
 	var pathPrefix string
 	var scoutlistPrefix string

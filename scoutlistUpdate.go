@@ -39,9 +39,9 @@ func rateLimiter(limiter chan int, stop chan int) {
 	}
 }
 
-func scoutlistUpdate(cu *clientUser, mode int) {
+func scoutlistUpdate(cu *clientUser, opt *options) {
 	cu.client.AutoRetry = true
-	strCon := getStringConsts(mode)
+	strCon := getStringConsts()
 
 	//playlists := cu.getPlaylists()
 	//savePlaylistsToJSON(strCon.PlaylistsPath, playlists)
@@ -62,8 +62,7 @@ func scoutlistUpdate(cu *clientUser, mode int) {
 
 	incPlaylists := loadPlaylistsFromJSON(strCon.IncPlaylistPath)
 
-	const lastN = 20
-	filteredTracks := cu.getUniqueTracksFromPlaylists(rateLimit, incPlaylists, excTracks, lastN)
+	filteredTracks := cu.getUniqueTracksFromPlaylists(rateLimit, incPlaylists, excTracks, opt.lastN)
 	fmt.Println(len(filteredTracks))
 	//fmt.Println(filteredTracks)
 
@@ -78,7 +77,7 @@ func scoutlistUpdate(cu *clientUser, mode int) {
 
 	excTracks = cu.recycleScoutlist(scoutlistID, scoutedlistID, excTracks)
 	saveTracksToGob(strCon.ExcTracksPath, excTracks)
-	trackIDs := getNTrackIDsFromTrackIDTASlice(filteredTracks, lastN, true)
+	trackIDs := getNTrackIDsFromTrackIDTASlice(filteredTracks, opt.outN, true)
 	//fmt.Println(trackIDs)
 	cu.replacePlaylistTracks(scoutlistID, trackIDs)
 }
