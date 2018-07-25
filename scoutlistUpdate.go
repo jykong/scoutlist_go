@@ -54,7 +54,7 @@ func scoutlistUpdate(cu *clientUser, opt *options) {
 	go rateLimiter(rateLimit, stopRateLimiter)
 	runtime.Gosched()
 
-	//excTracks := cu.getUniqueTracksFromPlaylists(rateLimit, excPlaylists, nil)
+	//excTracks := cu.getUniqueTracksFromPlaylists(rateLimit, excPlaylists, nil, 0)
 	//saveTracksToGob(strCon.ExcTracksPath, excTracks)
 	excTracks := loadTracksFromGob(strCon.ExcTracksPath)
 	fmt.Println(len(excTracks))
@@ -152,6 +152,10 @@ func (cu *clientUser) fetchPlaylistTracks(rateLimit chan int, plid spotify.ID,
 		log.Fatal(err)
 	}
 	total := plTrackPage.Total
+	uniqueTracks := make([]trackIDTA, 0)
+	if total == 0 {
+		return uniqueTracks
+	}
 	nPages := total / limit
 	if total%limit > 0 {
 		nPages++
@@ -163,7 +167,6 @@ func (cu *clientUser) fetchPlaylistTracks(rateLimit chan int, plid spotify.ID,
 		}(offset)
 	}
 	pgTracks <- getTracksFromPage(plTrackPage.Tracks)
-	uniqueTracks := make([]trackIDTA, 0)
 	var pgTrack []trackIDTA
 	for i := 0; i < nPages; i++ {
 		pgTrack = <-pgTracks
@@ -188,8 +191,11 @@ func (cu *clientUser) fetchLastNPlaylistTracks(rateLimit chan int, plid spotify.
 		log.Fatal(err)
 	}
 	total := plTrackPage.Total
-	var pgTrack []trackIDTA
 	uniqueTracks := make([]trackIDTA, 0)
+	if total == 0 {
+		return uniqueTracks
+	}
+	var pgTrack []trackIDTA
 	for offset = (total - total%limit); offset >= 0; offset -= limit {
 		if offset > 0 {
 			pgTrack = cu.fetchPlaylistTracksByPage(rateLimit, plid, offset, limit, &fields)
