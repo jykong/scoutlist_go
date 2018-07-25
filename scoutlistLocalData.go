@@ -27,15 +27,15 @@ type tracksStruct struct {
 	Tracks []trackIDTA
 }
 
-func getStringConsts(mode string) stringConsts {
+func getStringConsts(mode int) stringConsts {
 	var strCon stringConsts
 	var pathPrefix string
 	var scoutlistPrefix string
 	switch mode {
-	case "code_test":
+	case codeTest:
 		pathPrefix = "./code_test_data/"
 		scoutlistPrefix = "Test"
-	case "user_test":
+	case userTest:
 		pathPrefix = "./user_test_data/"
 		scoutlistPrefix = ""
 	default:

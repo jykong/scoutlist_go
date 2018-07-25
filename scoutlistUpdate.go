@@ -39,10 +39,9 @@ func rateLimiter(limiter chan int, stop chan int) {
 	}
 }
 
-func scoutlistUpdate(cu *clientUser) {
+func scoutlistUpdate(cu *clientUser, mode int) {
 	cu.client.AutoRetry = true
-
-	strCon := getStringConsts("code_test")
+	strCon := getStringConsts(mode)
 
 	//playlists := cu.getPlaylists()
 	//savePlaylistsToJSON(strCon.PlaylistsPath, playlists)
