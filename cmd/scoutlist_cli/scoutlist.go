@@ -8,46 +8,32 @@ import (
 	"runtime"
 	"runtime/pprof"
 
-	"github.com/zmb3/spotify"
+	"scoutlist"
 )
-
-type clientUser struct {
-	client *spotify.Client
-	userID string
-}
-
-const (
-	codeTest int = 0
-	userTest int = 1
-)
-const mode = codeTest
 
 var cpuprofile = flag.String("cpuprofile", "cpu.prof", "write cpu profile to `file`")
 var memprofile = flag.String("memprofile", "mem.prof", "write memory profile to `file`")
 var lastN = flag.Int("lastN", 0, "scoutlist mode: get last N tracks per playlist")
 var outN = flag.Int("outN", 30, "output N track scoutlist")
 
-type options struct {
-	lastN int
-	outN  int
-}
-
 func main() {
 	flag.Parse()
-	if mode == codeTest && *cpuprofile != "" {
+	mode := scoutlist.CodeTest
+	scoutlist.SetMode(mode)
+	if mode == scoutlist.CodeTest && *cpuprofile != "" {
 		cpuProfile()
 	}
 
-	var cu clientUser
-	cu.client = scoutlistAuth()
-	cu.getCurrentUserID()
+	var cu scoutlist.ClientUser
+	cu.Client = scoutlist.Auth()
+	getCurrentUserID(cu)
 
-	var opt options
-	opt.lastN = *lastN
-	opt.outN = *outN
-	scoutlistUpdate(&cu, &opt)
+	var opt scoutlist.Options
+	opt.LastN = *lastN
+	opt.OutN = *outN
+	scoutlist.Update(&cu, &opt)
 
-	if mode == codeTest && *memprofile != "" {
+	if mode == scoutlist.CodeTest && *memprofile != "" {
 		memProfile()
 	}
 }
@@ -75,11 +61,11 @@ func memProfile() {
 	f.Close()
 }
 
-func (cu *clientUser) getCurrentUserID() {
-	user, err := cu.client.CurrentUser()
+func getCurrentUserID(cu scoutlist.ClientUser) {
+	user, err := cu.Client.CurrentUser()
 	if err != nil {
 		log.Fatal(err)
 	}
 	fmt.Println("You are logged in as:", user.ID)
-	cu.userID = user.ID
+	cu.UserID = user.ID
 }

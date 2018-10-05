@@ -21,7 +21,8 @@ var (
 	state = "abc123"
 )
 
-func scoutlistAuth() *spotify.Client {
+// Auth authentication
+func Auth() *spotify.Client {
 	_, err := os.Stat(savedAuthTokenFile)
 	if os.IsNotExist(err) {
 		return authFromBrowser()

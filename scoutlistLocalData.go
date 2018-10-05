@@ -9,12 +9,13 @@ import (
 	"github.com/zmb3/spotify"
 )
 
+// Test Modes
 const (
-	codeTest int = 0
-	userTest int = 1
+	CodeTest int = 0
+	UserTest int = 1
 )
 
-var mode = codeTest
+var mode = CodeTest
 
 type stringConsts struct {
 	PlaylistsPath     string
@@ -34,7 +35,8 @@ type tracksStruct struct {
 	Tracks []trackIDTA
 }
 
-func setMode(newMode int) {
+// SetMode sets the mode
+func SetMode(newMode int) {
 	mode = newMode
 }
 
@@ -43,11 +45,11 @@ func getStringConsts() stringConsts {
 	var pathPrefix string
 	var scoutlistPrefix string
 	switch mode {
-	case codeTest:
-		pathPrefix = "./code_test_data/"
+	case CodeTest:
+		pathPrefix = "../../code_test_data/"
 		scoutlistPrefix = "Test"
-	case userTest:
-		pathPrefix = "./user_test_data/"
+	case UserTest:
+		pathPrefix = "../../user_test_data/"
 		scoutlistPrefix = ""
 	default:
 		pathPrefix = ""
