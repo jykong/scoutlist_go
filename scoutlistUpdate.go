@@ -1,4 +1,4 @@
-package main
+package scoutlist
 
 import (
 	"fmt"
@@ -10,6 +10,14 @@ import (
 	"github.com/zmb3/spotify"
 )
 
+type clientUser struct {
+	client *spotify.Client
+	userID string
+}
+type options struct {
+	lastN int
+	outN  int
+}
 type playlistEntry struct {
 	ID   spotify.ID `json:"id"`
 	Name string     `json:"name"`

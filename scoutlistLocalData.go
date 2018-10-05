@@ -1,4 +1,4 @@
-package main
+package scoutlist
 
 import (
 	"encoding/gob"
@@ -8,6 +8,13 @@ import (
 
 	"github.com/zmb3/spotify"
 )
+
+const (
+	codeTest int = 0
+	userTest int = 1
+)
+
+var mode = codeTest
 
 type stringConsts struct {
 	PlaylistsPath     string
@@ -25,6 +32,10 @@ type playlistsStruct struct {
 }
 type tracksStruct struct {
 	Tracks []trackIDTA
+}
+
+func setMode(newMode int) {
+	mode = newMode
 }
 
 func getStringConsts() stringConsts {

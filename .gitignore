@@ -7,3 +7,4 @@ debug
 *.prof
 scoutlist
 scoutlistUser
+vendor

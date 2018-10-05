@@ -1,4 +1,4 @@
-package main
+package scoutlist
 
 import (
 	"encoding/gob"
