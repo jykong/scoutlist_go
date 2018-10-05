@@ -5,6 +5,6 @@ debug
 *.json
 *.png
 *.prof
-scoutlist
+scoutlist_cli
 scoutlistUser
 vendor

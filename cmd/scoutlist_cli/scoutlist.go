@@ -13,12 +13,12 @@ import (
 
 var cpuprofile = flag.String("cpuprofile", "cpu.prof", "write cpu profile to `file`")
 var memprofile = flag.String("memprofile", "mem.prof", "write memory profile to `file`")
-var lastN = flag.Int("lastN", 0, "scoutlist mode: get last N tracks per playlist")
-var outN = flag.Int("outN", 30, "output N track scoutlist")
+var lastN = flag.Int("lastN", 15, "scoutlist mode: get last N tracks per playlist")
+var outN = flag.Int("outN", 15, "output N track scoutlist")
 
 func main() {
 	flag.Parse()
-	mode := scoutlist.CodeTest
+	mode := scoutlist.CodeTest // change this to switch between code & user tests
 	scoutlist.SetMode(mode)
 	if mode == scoutlist.CodeTest && *cpuprofile != "" {
 		cpuProfile()
