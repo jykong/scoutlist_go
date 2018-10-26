@@ -6,15 +6,14 @@ import (
 	"net/http"
 
 	"scoutlist"
+	"scoutlist/data/s3"
 )
 
-var cu scoutlist.ClientUser
-
 func main() {
-	mode := scoutlist.CodeTest // change this to switch between code & user tests
-	scoutlist.SetMode(mode)
+	var cu scoutlist.ClientUser
 
-	cu.Client = scoutlist.Auth()
+	sess := s3data.StartS3Session()
+	cu.Client = scoutlist.AuthFromS3(sess)
 	getCurrentUserID(cu)
 
 	handleRequests()
@@ -27,7 +26,7 @@ func homePage(w http.ResponseWriter, r *http.Request) {
 	var opt scoutlist.Options
 	opt.LastN = 15
 	opt.OutN = 15
-	scoutlist.Update(&cu, &opt)
+	//scoutlist.Update(&cu, &opt)
 }
 
 func handleRequests() {

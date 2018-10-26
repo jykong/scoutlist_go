@@ -1,8 +1,13 @@
 package scoutlist
 
 import (
+	"bytes"
 	"encoding/gob"
 	"fmt"
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"log"
 	"net/http"
 	"os"
@@ -28,6 +33,47 @@ func Auth() *spotify.Client {
 		return authFromBrowser()
 	}
 	return authFromFile()
+}
+
+// AuthFromS3 Authenticate from S3
+func AuthFromS3(sess *session.Session) *spotify.Client {
+	authTokenFilepath := os.Getenv("auth_token_filepath")
+	if authTokenFilepath == "" {
+		log.Fatal("Could not find auth_token_filepath environment variable.")
+	}
+	tok := s3loadTokenFromGob(sess, authTokenFilepath)
+	client := new(spotify.Client)
+	*client = auth.NewClient(tok)
+	return client
+}
+
+// LoadTokenFromGob ...
+func s3loadTokenFromGob(sess *session.Session, filePath string) *oauth2.Token {
+	bucket := os.Getenv("bucket")
+	if bucket == "" {
+		log.Fatal("Could not find bucket environment variable.")
+	}
+
+	downloader := s3manager.NewDownloader(sess)
+
+	buf := aws.NewWriteAtBuffer([]byte{})
+
+	numBytes, err := downloader.Download(buf,
+		&s3.GetObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(filePath),
+		})
+	if err != nil {
+		log.Fatalf("Unable to download item %q, %v", filePath, err)
+	}
+	var tok = new(oauth2.Token)
+	decoder := gob.NewDecoder(bytes.NewReader(buf.Bytes()))
+	err = decoder.Decode(&tok)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Downloaded %s\n%d bytes\n", filePath, numBytes)
+	return tok
 }
 
 func authFromBrowser() *spotify.Client {
@@ -67,10 +113,11 @@ func completeAuth(w http.ResponseWriter, r *http.Request) {
 		log.Fatalf("State mismatch: %s != %s\n", st, state)
 	}
 	// use the token to get an authenticated client
-	client := auth.NewClient(tok)
+	client := new(spotify.Client)
+	*client = auth.NewClient(tok)
 	saveTokenToFile(tok)
 	fmt.Fprintf(w, "Login Completed!")
-	ch <- &client
+	ch <- client
 }
 
 func saveTokenToFile(t *oauth2.Token) {
@@ -103,7 +150,8 @@ func authFromFile() *spotify.Client {
 	decoder := gob.NewDecoder(file)
 	err = decoder.Decode(&tok)
 
-	client := auth.NewClient(&tok)
+	client := new(spotify.Client)
+	*client = auth.NewClient(&tok)
 	log.Println("Auth complete.")
-	return &client
+	return client
 }
