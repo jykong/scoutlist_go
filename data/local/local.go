@@ -1,4 +1,4 @@
-package scoutlist
+package localdata
 
 import (
 	"encoding/gob"
@@ -7,17 +7,19 @@ import (
 	"os"
 
 	"github.com/zmb3/spotify"
+	"scoutlist/data/model"
 )
 
 // Test Modes
 const (
-	CodeTest int = 0
-	UserTest int = 1
+	codeTest int = 0
+	userTest int = 1
 )
 
-var mode = CodeTest
+var mode = codeTest
 
-type stringConsts struct {
+// StringConsts pre-defined filepaths
+type StringConsts struct {
 	PlaylistsPath     string
 	ExcPlaylistsPath  string
 	ExcTracksPath     string
@@ -29,26 +31,28 @@ type stringConsts struct {
 }
 
 type playlistsStruct struct {
-	Playlists []playlistEntry
+	Playlists []model.PlaylistEntry
 }
+
 type tracksStruct struct {
-	Tracks []trackIDTA
+	Tracks []model.TrackIDTA
 }
 
-// SetMode sets the mode
-func SetMode(newMode int) {
-	mode = newMode
+// ModeIsCodeTest Check if mode is set to code test
+func ModeIsCodeTest() bool {
+	return mode == codeTest
 }
 
-func getStringConsts() stringConsts {
-	var strCon stringConsts
+// GetStringConsts Get pre-defined filepaths
+func GetStringConsts() StringConsts {
+	var strCon StringConsts
 	var pathPrefix string
 	var scoutlistPrefix string
 	switch mode {
-	case CodeTest:
+	case codeTest:
 		pathPrefix = "../../code_test_data/"
 		scoutlistPrefix = "Test"
-	case UserTest:
+	case userTest:
 		pathPrefix = "../../user_test_data/"
 		scoutlistPrefix = ""
 	default:
@@ -66,7 +70,8 @@ func getStringConsts() stringConsts {
 	return strCon
 }
 
-func savePlaylistsToJSON(filePath string, playlists []playlistEntry) {
+// SavePlaylistsToJSON ...
+func SavePlaylistsToJSON(filePath string, playlists []model.PlaylistEntry) {
 	os.Remove(filePath)
 
 	file, err := os.Create(filePath)
@@ -86,7 +91,8 @@ func savePlaylistsToJSON(filePath string, playlists []playlistEntry) {
 	log.Println("User playlists saved to", filePath)
 }
 
-func loadPlaylistsFromJSON(filePath string) []playlistEntry {
+// LoadPlaylistsFromJSON ...
+func LoadPlaylistsFromJSON(filePath string) []model.PlaylistEntry {
 	log.Println("Loading playlists from", filePath)
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -101,7 +107,8 @@ func loadPlaylistsFromJSON(filePath string) []playlistEntry {
 	return plStruct.Playlists
 }
 
-func saveTracksToGob(filePath string, tracks []trackIDTA) {
+// SaveTracksToGob ...
+func SaveTracksToGob(filePath string, tracks []model.TrackIDTA) {
 	os.Remove(filePath)
 	file, err := os.Create(filePath)
 	if err != nil {
@@ -119,7 +126,8 @@ func saveTracksToGob(filePath string, tracks []trackIDTA) {
 	log.Println("Saved tracks to", filePath)
 }
 
-func loadTracksFromGob(filePath string) []trackIDTA {
+// LoadTracksFromGob ...
+func LoadTracksFromGob(filePath string) []model.TrackIDTA {
 	log.Println("Loading tracks from:", filePath)
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -134,7 +142,8 @@ func loadTracksFromGob(filePath string) []trackIDTA {
 	return trStruct.Tracks
 }
 
-func saveIDToGob(filePath string, spid *spotify.ID) {
+// SaveIDToGob ...
+func SaveIDToGob(filePath string, spid *spotify.ID) {
 	os.Remove(filePath)
 
 	file, err := os.Create(filePath)
@@ -151,7 +160,8 @@ func saveIDToGob(filePath string, spid *spotify.ID) {
 	log.Println("Saved ID to", filePath)
 }
 
-func loadIDFromGob(filePath string) spotify.ID {
+// LoadIDFromGob ...
+func LoadIDFromGob(filePath string) spotify.ID {
 	log.Println("Loading ID from:", filePath)
 	file, err := os.Open(filePath)
 	if err != nil {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zmb3/spotify"
+	"scoutlist/data/model"
 )
 
 // ClientUser Spotify Client and UserID
@@ -21,20 +22,22 @@ type Options struct {
 	LastN int
 	OutN  int
 }
-type playlistEntry struct {
-	ID   spotify.ID `json:"id"`
-	Name string     `json:"name"`
-}
-type titleArtists struct {
-	Title   string
-	Artists []string
-}
-type trackIDTA struct {
-	ID spotify.ID
-	TA titleArtists
-}
+
+var rateLimit chan int
+var stopRateLimiter chan int
 
 const initBurst int = 10
+
+func StartRateLimiter() {
+	rateLimit = make(chan int, initBurst)
+	stopRateLimiter = make(chan int, 1)
+	go rateLimiter(rateLimit, stopRateLimiter)
+	runtime.Gosched()
+}
+
+func StopRateLimiter() {
+	stopRateLimiter <- 1
+}
 
 func rateLimiter(limiter chan int, stop chan int) {
 	for i := 0; i < initBurst; i++ {
@@ -50,57 +53,13 @@ func rateLimiter(limiter chan int, stop chan int) {
 	}
 }
 
-// Update update
-func Update(cu *ClientUser, opt *Options) {
-	cu.Client.AutoRetry = true
-	strCon := getStringConsts()
-
-	//playlists := cu.getPlaylists()
-	//savePlaylistsToJSON(strCon.PlaylistsPath, playlists)
-
-	//excPlaylists := loadPlaylistsFromJSON(strCon.ExcPlaylistsPath)
-	//fmt.Println(excPlaylists)
-
-	rateLimit := make(chan int, initBurst)
-	stopRateLimiter := make(chan int, 1)
-	go rateLimiter(rateLimit, stopRateLimiter)
-	runtime.Gosched()
-
-	//excTracks := cu.getUniqueTracksFromPlaylists(rateLimit, excPlaylists, nil, 0)
-	//saveTracksToGob(strCon.ExcTracksPath, excTracks)
-	excTracks := loadTracksFromGob(strCon.ExcTracksPath)
-	fmt.Println(len(excTracks))
-	//fmt.Println(excTracks)
-
-	incPlaylists := loadPlaylistsFromJSON(strCon.IncPlaylistPath)
-
-	filteredTracks := cu.getUniqueTracksFromPlaylists(rateLimit, incPlaylists, excTracks, opt.LastN)
-	fmt.Println(len(filteredTracks))
-	//fmt.Println(filteredTracks)
-
-	stopRateLimiter <- 1
-
-	scoutlistID := loadIDFromGob(strCon.ScoutlistIDPath)
-	scoutedlistID := loadIDFromGob(strCon.ScoutedlistIDPath)
-	scoutlistID = cu.checkAndCreatePlaylist(scoutlistID, strCon.ScoutlistName)
-	scoutedlistID = cu.checkAndCreatePlaylist(scoutedlistID, strCon.ScoutedlistName)
-	saveIDToGob(strCon.ScoutlistIDPath, &scoutlistID)
-	saveIDToGob(strCon.ScoutedlistIDPath, &scoutedlistID)
-
-	excTracks = cu.recycleScoutlist(scoutlistID, scoutedlistID, excTracks)
-	saveTracksToGob(strCon.ExcTracksPath, excTracks)
-	trackIDs := getNTrackIDsFromTrackIDTASlice(filteredTracks, opt.OutN, true)
-	//fmt.Println(trackIDs)
-	cu.replacePlaylistTracks(scoutlistID, trackIDs)
-}
-
-func (cu *ClientUser) getPlaylists() []playlistEntry {
+func GetPlaylists(cu *ClientUser) []model.PlaylistEntry {
 	log.Println("Getting user playlists")
 	offset, limit := 0, 50
 	var opt spotify.Options
 	opt.Offset = &offset
 	opt.Limit = &limit
-	var playlists []playlistEntry
+	var playlists []model.PlaylistEntry
 	for total := limit; offset < total; offset += limit {
 		playlistsPage, err := cu.Client.GetPlaylistsForUserOpt(cu.UserID, &opt)
 		if err != nil {
@@ -108,9 +67,9 @@ func (cu *ClientUser) getPlaylists() []playlistEntry {
 		}
 		if playlists == nil {
 			total = playlistsPage.Total
-			playlists = make([]playlistEntry, total)
+			playlists = make([]model.PlaylistEntry, total)
 		}
-		var plEntry playlistEntry
+		var plEntry model.PlaylistEntry
 		for i, pl := range playlistsPage.Playlists {
 			plEntry.ID = pl.ID
 			plEntry.Name = pl.Name
@@ -120,24 +79,24 @@ func (cu *ClientUser) getPlaylists() []playlistEntry {
 	return playlists
 }
 
-func (cu *ClientUser) getUniqueTracksFromPlaylists(rateLimit chan int,
-	srcPlaylists []playlistEntry, excTracks []trackIDTA, lastN int) []trackIDTA {
+func GetUniqueTracksFromPlaylists(cu *ClientUser, srcPlaylists []model.PlaylistEntry,
+	excTracks []model.TrackIDTA, lastN int) []model.TrackIDTA {
 	log.Println("Getting unique tracks from playlists...")
 	nPlaylists := len(srcPlaylists)
-	plTracks := make(chan []trackIDTA, nPlaylists)
+	plTracks := make(chan []model.TrackIDTA, nPlaylists)
 	for i := 0; i < nPlaylists; i++ {
 		if lastN > 0 {
 			go func(plid spotify.ID) {
-				plTracks <- cu.fetchLastNPlaylistTracks(rateLimit, plid, excTracks, lastN)
+				plTracks <- fetchLastNPlaylistTracks(cu, plid, excTracks, lastN)
 			}(srcPlaylists[i].ID)
 		} else {
 			go func(plid spotify.ID) {
-				plTracks <- cu.fetchPlaylistTracks(rateLimit, plid, excTracks)
+				plTracks <- fetchPlaylistTracks(cu, plid, excTracks)
 			}(srcPlaylists[i].ID)
 		}
 		runtime.Gosched()
 	}
-	uniqueTracks := make([]trackIDTA, 0)
+	uniqueTracks := make([]model.TrackIDTA, 0)
 	acc := 0
 	for i := 0; i < nPlaylists; i++ {
 		srcTracks := <-plTracks
@@ -149,8 +108,8 @@ func (cu *ClientUser) getUniqueTracksFromPlaylists(rateLimit chan int,
 	return uniqueTracks
 }
 
-func (cu *ClientUser) fetchPlaylistTracks(rateLimit chan int, plid spotify.ID,
-	excTracks []trackIDTA) []trackIDTA {
+func fetchPlaylistTracks(cu *ClientUser, plid spotify.ID,
+	excTracks []model.TrackIDTA) []model.TrackIDTA {
 	offset, limit := 0, 100
 	var opt spotify.Options
 	opt.Offset = &offset
@@ -164,7 +123,7 @@ func (cu *ClientUser) fetchPlaylistTracks(rateLimit chan int, plid spotify.ID,
 		log.Fatal(err)
 	}
 	total := plTrackPage.Total
-	uniqueTracks := make([]trackIDTA, 0)
+	uniqueTracks := make([]model.TrackIDTA, 0)
 	if total == 0 {
 		return uniqueTracks
 	}
@@ -172,14 +131,14 @@ func (cu *ClientUser) fetchPlaylistTracks(rateLimit chan int, plid spotify.ID,
 	if total%limit > 0 {
 		nPages++
 	}
-	pgTracks := make(chan []trackIDTA, nPages)
+	pgTracks := make(chan []model.TrackIDTA, nPages)
 	for offset = limit; offset < total; offset += limit {
 		go func(offset int) {
-			pgTracks <- cu.fetchPlaylistTracksByPage(rateLimit, plid, offset, limit, &fields)
+			pgTracks <- fetchPlaylistTracksByPage(cu, plid, offset, limit, &fields)
 		}(offset)
 	}
 	pgTracks <- getTracksFromPage(plTrackPage.Tracks)
-	var pgTrack []trackIDTA
+	var pgTrack []model.TrackIDTA
 	for i := 0; i < nPages; i++ {
 		pgTrack = <-pgTracks
 		uniqueTracks = addUniqueTracks(uniqueTracks, pgTrack, excTracks)
@@ -188,8 +147,8 @@ func (cu *ClientUser) fetchPlaylistTracks(rateLimit chan int, plid spotify.ID,
 	return uniqueTracks
 }
 
-func (cu *ClientUser) fetchLastNPlaylistTracks(rateLimit chan int, plid spotify.ID,
-	excTracks []trackIDTA, lastN int) []trackIDTA {
+func fetchLastNPlaylistTracks(cu *ClientUser, plid spotify.ID,
+	excTracks []model.TrackIDTA, lastN int) []model.TrackIDTA {
 	offset, limit := 0, 100
 	var opt spotify.Options
 	opt.Offset = &offset
@@ -203,14 +162,14 @@ func (cu *ClientUser) fetchLastNPlaylistTracks(rateLimit chan int, plid spotify.
 		log.Fatal(err)
 	}
 	total := plTrackPage.Total
-	uniqueTracks := make([]trackIDTA, 0)
+	uniqueTracks := make([]model.TrackIDTA, 0)
 	if total == 0 {
 		return uniqueTracks
 	}
-	var pgTrack []trackIDTA
+	var pgTrack []model.TrackIDTA
 	for offset = (total - total%limit); offset >= 0; offset -= limit {
 		if offset > 0 {
-			pgTrack = cu.fetchPlaylistTracksByPage(rateLimit, plid, offset, limit, &fields)
+			pgTrack = fetchPlaylistTracksByPage(cu, plid, offset, limit, &fields)
 		} else {
 			pgTrack = getTracksFromPage(plTrackPage.Tracks)
 		}
@@ -223,8 +182,8 @@ func (cu *ClientUser) fetchLastNPlaylistTracks(rateLimit chan int, plid spotify.
 	return uniqueTracks
 }
 
-func (cu *ClientUser) fetchPlaylistTracksByPage(rateLimit chan int,
-	plid spotify.ID, offset int, limit int, fields *string) []trackIDTA {
+func fetchPlaylistTracksByPage(cu *ClientUser, plid spotify.ID,
+	offset int, limit int, fields *string) []model.TrackIDTA {
 	var opt spotify.Options
 	opt.Offset = &offset
 	opt.Limit = &limit
@@ -238,9 +197,9 @@ func (cu *ClientUser) fetchPlaylistTracksByPage(rateLimit chan int,
 	return getTracksFromPage(plTrackPage.Tracks)
 }
 
-func getTracksFromPage(pageTracks []spotify.PlaylistTrack) []trackIDTA {
-	tracks := make([]trackIDTA, len(pageTracks))
-	var track trackIDTA
+func getTracksFromPage(pageTracks []spotify.PlaylistTrack) []model.TrackIDTA {
+	tracks := make([]model.TrackIDTA, len(pageTracks))
+	var track model.TrackIDTA
 	for i, tr := range pageTracks {
 		track.TA.Title = tr.Track.Name
 		track.TA.Artists = nil
@@ -253,8 +212,8 @@ func getTracksFromPage(pageTracks []spotify.PlaylistTrack) []trackIDTA {
 	return tracks
 }
 
-func addUniqueTracks(uniqueTracks []trackIDTA, srcTracks []trackIDTA,
-	excTracks []trackIDTA) []trackIDTA {
+func addUniqueTracks(uniqueTracks []model.TrackIDTA, srcTracks []model.TrackIDTA,
+	excTracks []model.TrackIDTA) []model.TrackIDTA {
 	const interval = 7000
 	acc := 0
 	n := len(uniqueTracks)
@@ -282,7 +241,7 @@ func addUniqueTracks(uniqueTracks []trackIDTA, srcTracks []trackIDTA,
 	return uniqueTracks
 }
 
-func tracksContain(tracks []trackIDTA, newTrack *trackIDTA) bool {
+func tracksContain(tracks []model.TrackIDTA, newTrack *model.TrackIDTA) bool {
 	for i := 0; i < len(tracks); i++ {
 		if tracks[i].ID == newTrack.ID {
 			return true
@@ -313,30 +272,30 @@ func tracksContain(tracks []trackIDTA, newTrack *trackIDTA) bool {
 	return false
 }
 
-func tracksAdd(tracks []trackIDTA, track *trackIDTA) []trackIDTA {
+func tracksAdd(tracks []model.TrackIDTA, track *model.TrackIDTA) []model.TrackIDTA {
 	if !tracksContain(tracks, track) {
 		return append(tracks, *track)
 	}
 	return tracks
 }
 
-func (cu *ClientUser) checkAndCreatePlaylist(plid spotify.ID, plname string) spotify.ID {
+func CheckAndCreatePlaylist(cu *ClientUser, plid spotify.ID, plname string) spotify.ID {
 	if plid == "" {
-		return cu.createPlaylist(plid, plname)
+		return createPlaylist(cu, plid, plname)
 	}
 	_, err := cu.Client.GetPlaylist(cu.UserID, plid)
 	if err != nil {
 		// TODO: modify to examine # of followers & followers object
 		log.Println(plname + "not found on Spotify")
-		return cu.createPlaylist(plid, plname)
+		return createPlaylist(cu, plid, plname)
 	}
 	return plid
 }
 
-func (cu *ClientUser) recycleScoutlist(scoutlistID spotify.ID, scoutedlistID spotify.ID,
-	excTracks []trackIDTA) []trackIDTA {
+func RecycleScoutlist(cu *ClientUser, scoutlistID spotify.ID, scoutedlistID spotify.ID,
+	excTracks []model.TrackIDTA) []model.TrackIDTA {
 	if excTracks == nil {
-		scoutlistTrackIDs, err := cu.getPlaylistTrackIDs(scoutlistID)
+		scoutlistTrackIDs, err := getPlaylistTrackIDs(cu, scoutlistID)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -347,9 +306,9 @@ func (cu *ClientUser) recycleScoutlist(scoutlistID spotify.ID, scoutedlistID spo
 			}
 		}
 	} else {
-		scoutlistTracks := cu.fetchPlaylistTracks(nil, scoutlistID, nil)
+		scoutlistTracks := fetchPlaylistTracks(cu, scoutlistID, nil)
 		if len(scoutlistTracks) > 0 {
-			scoutlistTrackIDs := getNTrackIDsFromTrackIDTASlice(scoutlistTracks, -1, false)
+			scoutlistTrackIDs := GetNTrackIDsFromTrackIDTASlice(scoutlistTracks, -1, false)
 			_, err := cu.Client.AddTracksToPlaylist(cu.UserID, scoutedlistID, scoutlistTrackIDs...)
 			if err != nil {
 				log.Fatal(err)
@@ -360,7 +319,7 @@ func (cu *ClientUser) recycleScoutlist(scoutlistID spotify.ID, scoutedlistID spo
 	return excTracks
 }
 
-func (cu *ClientUser) createPlaylist(scoutlistID spotify.ID, s string) spotify.ID {
+func createPlaylist(cu *ClientUser, scoutlistID spotify.ID, s string) spotify.ID {
 	log.Println("Creating new", s)
 	pl, err := cu.Client.CreatePlaylistForUser(cu.UserID, s, false)
 	if err != nil {
@@ -369,7 +328,7 @@ func (cu *ClientUser) createPlaylist(scoutlistID spotify.ID, s string) spotify.I
 	return pl.ID
 }
 
-func (cu *ClientUser) getPlaylistTrackIDs(plid spotify.ID) ([]spotify.ID, error) {
+func getPlaylistTrackIDs(cu *ClientUser, plid spotify.ID) ([]spotify.ID, error) {
 	log.Println("Getting playlist track ids...")
 	var trackIDs []spotify.ID
 	var offset, limit, total int
@@ -393,7 +352,7 @@ func (cu *ClientUser) getPlaylistTrackIDs(plid spotify.ID) ([]spotify.ID, error)
 	return trackIDs, nil
 }
 
-func getNTrackIDsFromTrackIDTASlice(tracks []trackIDTA, n int, random bool) []spotify.ID {
+func GetNTrackIDsFromTrackIDTASlice(tracks []model.TrackIDTA, n int, random bool) []spotify.ID {
 	size := len(tracks)
 	if size < n || n == -1 {
 		n = size
@@ -431,7 +390,7 @@ func getNTrackIDsFromTrackIDTASlice(tracks []trackIDTA, n int, random bool) []sp
 	return trackIDs
 }
 
-func (cu *ClientUser) replacePlaylistTracks(plid spotify.ID, trackIDs []spotify.ID) {
+func ReplacePlaylistTracks(cu *ClientUser, plid spotify.ID, trackIDs []spotify.ID) {
 	log.Println("Replacing playlist tracks...")
 
 	err := cu.Client.ReplacePlaylistTracks(cu.UserID, plid, trackIDs...)
